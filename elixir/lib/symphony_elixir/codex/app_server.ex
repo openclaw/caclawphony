@@ -871,12 +871,22 @@ defmodule SymphonyElixir.Codex.AppServer do
       |> String.slice(0, @max_stream_log_bytes)
 
     if text != "" do
-      if String.match?(text, ~r/\b(error|warn|warning|failed|fatal|panic|exception)\b/i) do
-        Logger.warning("Codex #{stream_label} output: #{text}")
-      else
-        Logger.debug("Codex #{stream_label} output: #{text}")
+      cond do
+        suppress_stream_log_line?(text) ->
+          :ok
+
+        String.match?(text, ~r/\b(error|warn|warning|failed|fatal|panic|exception)\b/i) ->
+          Logger.warning("Codex #{stream_label} output: #{text}")
+
+        true ->
+          Logger.debug("Codex #{stream_label} output: #{text}")
       end
     end
+  end
+
+  defp suppress_stream_log_line?(text) when is_binary(text) do
+    normalized = String.downcase(text)
+    String.contains?(normalized, "missing rollout path") or String.contains?(normalized, "rollout path missing")
   end
 
   defp issue_context(%{id: issue_id, identifier: identifier}) do
