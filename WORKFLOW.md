@@ -14,9 +14,9 @@ workspace:
 
 hooks:
   after_create: |
-    # Backlog enrichment is lightweight — just needs gh CLI, no repo clone
+    # Backlog enrichment is lightweight -- just needs gh CLI, no repo clone
     if [ "$SYMPHONY_ISSUE_STATE" = "Backlog" ]; then
-      echo "Backlog enrichment — skipping repo clone"
+      echo "Backlog enrichment -- skipping repo clone"
       exit 0
     fi
     git clone /Users/phaedrus/Projects/openclaw . 2>/dev/null || true
@@ -67,13 +67,13 @@ codex:
     type: dangerFullAccess
 ---
 
-# Caclawphony — openclaw/openclaw PR Pipeline
+# Caclawphony -- openclaw/openclaw PR Pipeline
 
 You are a maintainer agent working on the openclaw/openclaw repository.
 
 ## Issue Context
 
-- **Issue:** {{ issue.identifier }} — {{ issue.title }}
+- **Issue:** {{ issue.identifier }} -- {{ issue.title }}
 - **Description:** {{ issue.description }}
 - **State:** {{ issue.state }}
 {% if attempt %}- **Attempt:** {{ attempt }}{% endif %}
@@ -95,11 +95,11 @@ or a GitHub URL like "https://github.com/openclaw/openclaw/pull/1234").
 Gather data using `gh` CLI, then produce an assessment with the following sections:
 
 #### 1. Summary (2-3 sentences)
-What does this PR do? Restate in plain language — don't just copy the title.
+What does this PR do? Restate in plain language -- don't just copy the title.
 
 #### 2. Vital Signs
 - **Status:** Open / Draft / Closed / Merged
-- **CI:** ✅ Passing / ❌ Failing (list failed checks) / ⏳ Pending
+- **CI:** PASS Passing / FAIL Failing (list failed checks) / PENDING Pending
 - **Mergeable:** Yes / Conflicts / Unknown
 - **Age:** Created X days ago, last updated Y days ago
 - **Author:** @username (association: member/contributor/first-timer, N total open PRs)
@@ -130,11 +130,11 @@ Determine a recommendation and priority:
 | **SKIP** | Not worth reviewing right now | 4 (low) or 0 (none) for spam/stale |
 
 Determine an **estimate** (Fibonacci complexity):
-- **1** — trivial (typo, one-liner, docs-only)
-- **2** — small (single-file fix, <50 lines)
-- **3** — medium (multi-file, focused change)
-- **5** — large (new feature, cross-cutting)
-- **8** — very large (architectural, multi-subsystem)
+- **1** -- trivial (typo, one-liner, docs-only)
+- **2** -- small (single-file fix, <50 lines)
+- **3** -- medium (multi-file, focused change)
+- **5** -- large (new feature, cross-cutting)
+- **8** -- very large (architectural, multi-subsystem)
 
 Determine **subsystem labels** from the files changed. Map to these label IDs:
 
@@ -169,12 +169,12 @@ gh search prs --repo openclaw/openclaw --state open -- "<search terms from chang
 
 **When finished**, update this Linear issue in a single mutation with ALL of the following:
 
-1. **Title** → `[RECOMMENDATION] PR #XXXX: <original title>`
-2. **State** → Todo (`0772f6b2-85fa-4c21-ab14-6705687d475f`)
-3. **Priority** → integer from the table above
-4. **Estimate** → Fibonacci complexity from the table above
-5. **Labels** → one recommendation label + all matching subsystem labels (array of IDs)
-6. **Assignee** → `5bbd2a49-0fde-4fdd-b265-f6991c718e87` (maintainer — for human review gate)
+1. **Title** -> `[RECOMMENDATION] PR #XXXX: <original title>`
+2. **State** -> Todo (`0772f6b2-85fa-4c21-ab14-6705687d475f`)
+3. **Priority** -> integer from the table above
+4. **Estimate** -> Fibonacci complexity from the table above
+5. **Labels** -> one recommendation label + all matching subsystem labels (array of IDs)
+6. **Assignee** -> `5bbd2a49-0fde-4fdd-b265-f6991c718e87` (maintainer -- for human review gate)
 
 ```graphql
 mutation {
@@ -244,6 +244,6 @@ mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "e085693d-8142-46
 
 ## Rules
 
-- **Never comment on the PR on GitHub** — no PR comments, no review submissions
-- **Never delete the worktree** — it persists across pipeline stages
+- **Never comment on the PR on GitHub** -- no PR comments, no review submissions
+- **Never delete the worktree** -- it persists across pipeline stages
 - If you encounter an error you can't resolve, leave a comment on the Linear issue explaining what went wrong
