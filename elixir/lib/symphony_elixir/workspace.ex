@@ -123,7 +123,7 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp maybe_run_after_create_hook(workspace, issue_context, created?) do
-    case created? do
+    case created? and not workspace_git_initialized?(workspace) do
       true ->
         case Config.workspace_hooks()[:after_create] do
           nil ->
@@ -136,6 +136,12 @@ defmodule SymphonyElixir.Workspace do
       false ->
         :ok
     end
+  end
+
+  defp workspace_git_initialized?(workspace) when is_binary(workspace) do
+    workspace
+    |> Path.join(".git")
+    |> File.dir?()
   end
 
   defp maybe_run_before_remove_hook(workspace) do
