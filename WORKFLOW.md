@@ -254,7 +254,7 @@ mutation {
 }
 ```
 
-Create relation:
+Create relation (and verify it was persisted):
 ```graphql
 mutation {
   issueRelationCreate(input: {
@@ -263,9 +263,21 @@ mutation {
     type: duplicates
   }) {
     success
+    issueRelation { id }
   }
 }
 ```
+
+**Verify each relation was created** by querying back:
+```graphql
+query {
+  issue(id: "{{ issue.id }}") {
+    relations { nodes { type relatedIssue { identifier } } }
+  }
+}
+```
+If any expected relations are missing, retry `issueRelationCreate`. Do not proceed until all duplicate relations are confirmed.
+
 5. Include cluster info in your assessment comment: members, canonical PR, and canonical selection rationale.
 
 If the PR is not in any cluster, or confidence is low/unknown, skip this section and continue normal enrichment.
@@ -386,6 +398,13 @@ query {
 ```
 
 For each related Duplicate issue, extract the duplicate PR number and check whether it contains uncaptured value not covered by the canonical merge. Post a comment on the Duplicate Linear issue including merge confirmation, unique-value determination, recommended action (CLOSE or REOPEN), and a draft closing comment.
+
+Then **move each Duplicate issue to Closure** so the closure agent can process it:
+```graphql
+mutation {
+  issueUpdate(id: "<duplicate_issue_id>", input: { stateId: "{{ states.closure }}" }) { success }
+}
+```
 
 2. **Then transition this issue** to Done (this MUST be last -- it ends your session):
 ```
