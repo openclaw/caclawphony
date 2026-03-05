@@ -167,7 +167,20 @@ gh pr checks <PR> --repo openclaw/openclaw
 gh search prs --repo openclaw/openclaw --state open -- "<search terms from changed files>"
 ```
 
-**When finished**, update this Linear issue in a single mutation with ALL of the following:
+**When finished**, do these steps IN THIS ORDER (comment first, mutation last):
+
+**Step 1: Post your full assessment as a comment on this Linear issue.**
+
+```graphql
+mutation {
+  commentCreate(input: {
+    issueId: "{{ issue.id }}"
+    body: "<your full assessment markdown>"
+  }) { success }
+}
+```
+
+**Step 2: Update the issue metadata in a single mutation (this MUST be last -- it triggers a state transition that ends your session):**
 
 1. **Title** -> `[RECOMMENDATION] PR #XXXX: <original title>`
 2. **State** -> Todo (`0772f6b2-85fa-4c21-ab14-6705687d475f`)
@@ -189,8 +202,6 @@ mutation {
 }
 ```
 
-Also post your full assessment as a **comment** on this Linear issue.
-
 {% elsif issue.state == "Review" %}
 ### Review Phase
 
@@ -198,12 +209,14 @@ Read the skill file at `.agents/skills/review-pr/SKILL.md` and follow its instru
 
 Do NOT comment on the PR on GitHub. Do NOT push any changes. This is a read-only review.
 
-**When finished**, post a summary comment on this Linear issue with:
-- The recommendation from `.local/review.json`
-- A concise summary of findings (severity + title for each)
-- Key concerns or blockers
+**When finished**, do these steps IN THIS ORDER (comment first, state transition last):
 
-Then transition this issue to **Review Complete** and assign to the maintainer for decision:
+1. **Post a summary comment** on this Linear issue with:
+   - The recommendation from `.local/review.json`
+   - A concise summary of findings (severity + title for each)
+   - Key concerns or blockers
+
+2. **Then transition this issue** to Review Complete (this MUST be last -- it ends your session):
 ```
 mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "4f363475-bf45-48a0-9466-c38eef79aded", assigneeId: "5bbd2a49-0fde-4fdd-b265-f6991c718e87" }) { success } }
 ```
@@ -215,12 +228,14 @@ Read the skill file at `.agents/skills/prepare-pr/SKILL.md` and follow its instr
 
 The `.local/review.md` and `.local/review.json` from the review phase should already be in this workspace.
 
-**When finished**, post a summary comment on this Linear issue with:
-- What findings were fixed
-- Gate results (pass/fail)
-- Push status
+**When finished**, do these steps IN THIS ORDER (comment first, state transition last):
 
-Then transition this issue to **Prepare Complete** and assign to the maintainer for merge decision:
+1. **Post a summary comment** on this Linear issue with:
+   - What findings were fixed
+   - Gate results (pass/fail)
+   - Push status
+
+2. **Then transition this issue** to Prepare Complete (this MUST be last -- it ends your session):
 ```
 mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "0671e7cc-46b5-424e-aed3-d9408c9d3eb9", assigneeId: "5bbd2a49-0fde-4fdd-b265-f6991c718e87" }) { success } }
 ```
@@ -230,12 +245,14 @@ mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "0671e7cc-46b5-42
 
 Read the skill file at `.agents/skills/merge-pr/SKILL.md` and follow its instructions exactly.
 
-**When finished**, post a summary comment on this Linear issue with:
-- Merge commit SHA
-- PR URL
-- Any cleanup performed
+**When finished**, do these steps IN THIS ORDER (comment first, state transition last):
 
-Then transition this issue to **Done**:
+1. **Post a summary comment** on this Linear issue with:
+   - Merge commit SHA
+   - PR URL
+   - Any cleanup performed
+
+2. **Then transition this issue** to Done (this MUST be last -- it ends your session):
 ```
 mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "e085693d-8142-4671-9de5-20286fae8ec6" }) { success } }
 ```
