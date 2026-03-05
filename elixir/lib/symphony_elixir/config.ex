@@ -227,11 +227,11 @@ defmodule SymphonyElixir.Config do
                                default: %{}
                              ],
                              labels: [
-                               type: :map,
+                               type: {:map, :string, :any},
                                default: %{}
                              ],
                              states: [
-                               type: :map,
+                               type: {:map, :string, :string},
                                default: %{}
                              ]
                            )
@@ -728,7 +728,7 @@ defmodule SymphonyElixir.Config do
     end)
   end
 
-  defp extract_gates_options(_section), do: :omit
+  defp extract_gates_options(_section), do: %{}
 
   defp extract_gate_options(gate_options) when is_map(gate_options) do
     gate_options = normalize_keys(gate_options)
@@ -751,11 +751,11 @@ defmodule SymphonyElixir.Config do
   defp extract_labels_options(section) when is_map(section) do
     case nested_string_map_value(section) do
       %{} = labels when map_size(labels) > 0 -> labels
-      _ -> :omit
+      _ -> %{}
     end
   end
 
-  defp extract_labels_options(_section), do: :omit
+  defp extract_labels_options(_section), do: %{}
 
   defp extract_states_options(section) when is_map(section) do
     section
@@ -769,11 +769,11 @@ defmodule SymphonyElixir.Config do
     end)
     |> case do
       states when map_size(states) > 0 -> states
-      _ -> :omit
+      _ -> %{}
     end
   end
 
-  defp extract_states_options(_section), do: :omit
+  defp extract_states_options(_section), do: %{}
 
   defp extract_notification_telegram_options(section) do
     %{}

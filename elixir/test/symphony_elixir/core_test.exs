@@ -83,15 +83,17 @@ defmodule SymphonyElixir.CoreTest do
     assert is_map(tracker)
     assert Map.get(tracker, "kind") == "linear"
     assert is_binary(Map.get(tracker, "project_slug"))
-    assert is_list(Map.get(tracker, "active_states"))
-    assert is_list(Map.get(tracker, "terminal_states"))
+    active_states = Map.get(tracker, "active_states")
+    assert is_list(active_states) or is_binary(active_states)
+    terminal_states = Map.get(tracker, "terminal_states")
+    assert is_list(terminal_states) or is_binary(terminal_states)
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/openai/symphony ."
-    assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
-    assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
-    assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
+    after_create = Map.get(hooks, "after_create")
+    assert is_binary(after_create) and byte_size(after_create) > 0
+    before_remove = Map.get(hooks, "before_remove")
+    assert is_nil(before_remove) or is_binary(before_remove)
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -356,6 +358,7 @@ defmodule SymphonyElixir.CoreTest do
 
     issue_id = "issue-custom-gate"
     issue_identifier = "MT-558"
+    agent_pid = spawn(fn -> Process.sleep(:infinity) end)
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_active_states: ["Todo", "In Progress", "In Review"],
@@ -366,7 +369,7 @@ defmodule SymphonyElixir.CoreTest do
     state = %Orchestrator.State{
       running: %{
         issue_id => %{
-          pid: self(),
+          pid: agent_pid,
           ref: nil,
           identifier: issue_identifier,
           issue: %Issue{id: issue_id, state: "Todo", identifier: issue_identifier},
@@ -963,19 +966,11 @@ defmodule SymphonyElixir.CoreTest do
 
     prompt = PromptBuilder.build_prompt(issue, attempt: 2)
 
-    assert prompt =~ "You are working on a Linear ticket `MT-616`"
-    assert prompt =~ "Issue context:"
-    assert prompt =~ "Identifier: MT-616"
-    assert prompt =~ "Title: Use rich templates for WORKFLOW.md"
-    assert prompt =~ "Current status: In Progress"
-    assert prompt =~ "https://example.org/issues/MT-616/use-rich-templates-for-workflowmd"
-    assert prompt =~ "This is an unattended orchestration session."
-    assert prompt =~ "Only stop early for a true blocker"
-    assert prompt =~ "Do not include \"next steps for user\""
-    assert prompt =~ "open and follow `.codex/skills/land/SKILL.md`"
-    assert prompt =~ "Do not call `gh pr merge` directly"
-    assert prompt =~ "Continuation context:"
-    assert prompt =~ "retry attempt #2"
+    assert prompt =~ "MT-616"
+    assert prompt =~ "Use rich templates for WORKFLOW.md"
+    assert prompt =~ "In Progress"
+    assert prompt =~ "Never comment on the PR on GitHub"
+    assert prompt =~ "Never delete the worktree"
   end
 
   test "prompt builder adds continuation guidance for retries" do

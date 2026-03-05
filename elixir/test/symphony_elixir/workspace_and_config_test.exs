@@ -753,7 +753,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.observability_render_interval_ms() == 16
     assert Config.server_port() == nil
     assert Config.server_host() == "123"
-    assert Config.notification_gate_states() == ["Review Complete", "Prepare Complete"]
+    assert Enum.sort(Config.notification_gate_states()) == ["Prepare Complete", "Review Complete"]
     assert Config.notification_template() =~ "🧹"
     assert Config.notifications().telegram.bot_token == nil
     assert Config.notifications().telegram.chat_id == nil
@@ -945,7 +945,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       }
     )
 
-    assert Config.notification_gate_states() == ["Prepare Complete", "Human Gate"]
+    assert Enum.sort(Config.notification_gate_states()) == ["Human Gate", "Prepare Complete"]
     assert Config.gates()["human_gate"]["state_id"] == "state-human-gate"
     assert Config.gates()["human_gate"]["assignee"] == "human"
     assert Config.gates()["human_gate"]["notify"] == true
