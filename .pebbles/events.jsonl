@@ -8,3 +8,4 @@
 {"type":"create","timestamp":"2026-03-05T08:24:14.956359Z","issue_id":"caclawphony-9ed","payload":{"description":"Codex spews ~50 'state db missing rollout path' ERROR lines on startup from old sessions. These are harmless but noisy in symphony.log. Options: (1) clean up ~/.codex/ state DB, (2) filter these lines in the Codex stream output handler in codex_app_server.ex, (3) set Codex log level.","priority":"2","title":"Suppress stale rollout path errors on Codex startup","type":"task"}}
 {"type":"dep_add","timestamp":"2026-03-05T08:24:18.975269Z","issue_id":"caclawphony-87b","payload":{"dep_type":"blocks","depends_on":"caclawphony-432"}}
 {"type":"dep_add","timestamp":"2026-03-05T08:24:19.032248Z","issue_id":"caclawphony-5c2","payload":{"dep_type":"blocks","depends_on":"caclawphony-87b"}}
+{"type":"close","timestamp":"2026-03-05T08:24:47.5443Z","issue_id":"caclawphony-5fb","payload":{}}
