@@ -971,6 +971,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "In Progress"
     assert prompt =~ "Never comment on the PR on GitHub"
     assert prompt =~ "Never delete the worktree"
+    assert Config.linear_active_states() == ["Backlog", "Review", "Prepare", "Merge", "Closure"]
+    assert Config.states()["todo"] == "0772f6b2-85fa-4c21-ab14-6705687d475f"
+    assert Config.states()["duplicate"] == "e0c34ba1-e3b3-4de1-b16b-51a7b1be6e4d"
+    assert Config.states()["closure"] == "8279191b-e703-4d17-b5c0-16f17af7206f"
+    assert Config.states()["done"] == "e085693d-8142-4671-9de5-20286fae8ec6"
   end
 
   test "prompt builder adds continuation guidance for retries" do

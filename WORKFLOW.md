@@ -3,7 +3,7 @@ tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
   project_slug: d9873e6beee9
-  active_states: Backlog, Review, Prepare, Merge
+  active_states: Backlog, Review, Prepare, Merge, Closure
   terminal_states: Done, Canceled, Duplicate
 
 polling:
@@ -17,6 +17,10 @@ hooks:
     # Backlog enrichment is lightweight -- just needs gh CLI, no repo clone
     if [ "$SYMPHONY_ISSUE_STATE" = "Backlog" ]; then
       echo "Backlog enrichment -- skipping repo clone"
+      exit 0
+    fi
+    if [ "$SYMPHONY_ISSUE_STATE" = "Closure" ]; then
+      echo "Closure agent -- just needs gh CLI, no repo clone"
       exit 0
     fi
     git clone /Users/phaedrus/Projects/openclaw . 2>/dev/null || true
@@ -39,8 +43,10 @@ hooks:
       gh pr checkout "$PR_NUM" --force 2>/dev/null || git checkout main
     fi
   before_run: |
-    # Backlog enrichment doesn't need repo operations
-    [ "$SYMPHONY_ISSUE_STATE" = "Backlog" ] && exit 0
+    # Backlog and Closure phases don't need repo operations
+    if [ "$SYMPHONY_ISSUE_STATE" = "Backlog" ] || [ "$SYMPHONY_ISSUE_STATE" = "Closure" ]; then
+      exit 0
+    fi
     # Ensure we're on the right branch and up to date
     PR_NUM=$(echo "$SYMPHONY_ISSUE_TITLE" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
     if [ -n "$PR_NUM" ]; then
@@ -89,6 +95,9 @@ gates:
 
 states:
   todo: "0772f6b2-85fa-4c21-ab14-6705687d475f"
+  duplicate: "e0c34ba1-e3b3-4de1-b16b-51a7b1be6e4d"
+  closure: "8279191b-e703-4d17-b5c0-16f17af7206f"
+  done: "e085693d-8142-4671-9de5-20286fae8ec6"
 
 labels:
   recommendation:
@@ -200,6 +209,67 @@ Recommendation labels (always apply exactly one):
 | wait | `{{ labels.recommendation.wait }}` |
 | skip | `{{ labels.recommendation.skip }}` |
 
+#### 7. Cluster Detection
+
+Run this command to load cached cluster data:
+```bash
+/Users/phaedrus/Projects/maintainers/scripts/pr-plan --use-cache --out /Users/phaedrus/Projects/maintainers/.local/pr-plan
+```
+
+Inspect:
+- `/Users/phaedrus/Projects/maintainers/.local/pr-plan/clusters.json`
+- `/Users/phaedrus/Projects/maintainers/.local/pr-plan/cluster-refinements.json`
+
+Find whether the current PR number appears in any cluster.
+
+If the PR is in a cluster with medium or high confidence:
+1. For each cluster member, fetch metadata:
+```bash
+gh pr view <N> --repo openclaw/openclaw --json number,title,state,createdAt,updatedAt,additions,deletions,changedFiles,reviews,isDraft,mergeable
+```
+2. Pick the canonical PR -- the best candidate for merging. Prioritize:
+   - Not draft and not closed
+   - Clean CI with passing checks
+   - Mergeable with no conflicts
+   - Has tests or a meaningful description
+   - Fresher (more recently updated)
+   - Smaller and more focused
+   - Has reviews or approvals
+3. If canonical PR differs from this issue's PR number, update this issue title to reference the canonical PR number.
+4. For each non-canonical PR, create a Linear issue in Duplicate state, then relate it to this canonical issue.
+
+Create duplicate issues:
+```graphql
+mutation {
+  issueCreate(input: {
+    teamId: "2d3d9f55-ef35-47cc-a820-aeeb61399256"
+    title: "PR #XXXX: <title> (duplicate of #CANONICAL)"
+    description: "Duplicate of IDENTIFIER. This PR is part of a cluster and will be reviewed for closure after the canonical PR merges."
+    stateId: "{{ states.duplicate }}"
+    projectId: "07919ebc-e133-4c0c-82b9-ead654ec06a2"
+  }) {
+    success
+    issue { id identifier }
+  }
+}
+```
+
+Create relation:
+```graphql
+mutation {
+  issueRelationCreate(input: {
+    issueId: "<new_duplicate_issue_id>"
+    relatedIssueId: "{{ issue.id }}"
+    type: duplicates
+  }) {
+    success
+  }
+}
+```
+5. Include cluster info in your assessment comment: members, canonical PR, and canonical selection rationale.
+
+If the PR is not in any cluster, or confidence is low/unknown, skip this section and continue normal enrichment.
+
 **Data gathering commands:**
 ```bash
 gh pr view <PR> --repo openclaw/openclaw --json number,title,body,author,state,isDraft,createdAt,updatedAt,mergeable,files,additions,deletions,changedFiles,statusCheckRollup,reviews,authorAssociation,headRepository
@@ -292,10 +362,59 @@ Read the skill file at `.agents/skills/merge-pr/SKILL.md` and follow its instruc
    - Merge commit SHA
    - PR URL
    - Any cleanup performed
+   - Duplicate review summary (for each related Duplicate issue): whether duplicate has unique value, recommended action (CLOSE or REOPEN), and a draft closing comment
+
+Before the state transition, query issue relations to find Duplicate issues:
+```graphql
+query {
+  issue(id: "{{ issue.id }}") {
+    relations {
+      nodes {
+        relatedIssue {
+          id
+          identifier
+          title
+          state {
+            name
+          }
+        }
+        type
+      }
+    }
+  }
+}
+```
+
+For each related Duplicate issue, extract the duplicate PR number and check whether it contains uncaptured value not covered by the canonical merge. Post a comment on the Duplicate Linear issue including merge confirmation, unique-value determination, recommended action (CLOSE or REOPEN), and a draft closing comment.
 
 2. **Then transition this issue** to Done (this MUST be last -- it ends your session):
 ```
 mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "e085693d-8142-4671-9de5-20286fae8ec6" }) { success } }
+```
+
+{% elsif issue.state == "Closure" %}
+### Closure Phase
+
+The Closure agent closes a duplicate or superseded PR on GitHub.
+
+1. Extract the duplicate PR number from this issue title.
+2. Read this issue description and comments to understand closure context.
+3. Find the canonical or superseding PR from related issues.
+4. Check canonical PR status with `gh`.
+5. Draft a GitHub closing comment:
+   - If canonical PR is merged, mention the canonical PR and merge commit SHA.
+   - If canonical PR is still open, state this PR is a duplicate and reference the canonical PR.
+6. Post the closing comment with `gh pr comment`.
+7. Close the duplicate PR with `gh pr close`.
+8. Post a confirmation comment on this Linear issue.
+
+9. Then transition this issue to Done (this MUST be last -- it ends your session):
+```graphql
+mutation {
+  issueUpdate(id: "{{ issue.id }}", input: { stateId: "{{ states.done }}" }) {
+    success
+  }
+}
 ```
 
 {% endif %}
