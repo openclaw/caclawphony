@@ -38,7 +38,7 @@ agent:
 
 codex:
   command: codex app-server
-  approval_policy: on-failure
+  approval_policy: never
   read_timeout_ms: 30000
   turn_timeout_ms: 1800000
   stall_timeout_ms: 300000
