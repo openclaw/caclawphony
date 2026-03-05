@@ -440,6 +440,8 @@ mutation {
 
 ## Rules
 
+{% if issue.state != "Closure" %}
 - **Never comment on the PR on GitHub** -- no PR comments, no review submissions
+{% endif %}
 - **Never delete the worktree** -- it persists across pipeline stages
 - If you encounter an error you can't resolve, leave a comment on the Linear issue explaining what went wrong
