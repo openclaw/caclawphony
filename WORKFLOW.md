@@ -442,6 +442,12 @@ mutation {
 {% elsif issue.state == "Review" %}
 ### Review Phase
 
+**Before starting work**, check this Linear issue for maintainer comments that may contain context, focus areas, or known issues. Query:
+```graphql
+query { issue(id: "{{ issue.id }}") { comments { nodes { body createdAt user { name } } } } }
+```
+If any comments contain review guidance from the maintainer, factor them into your analysis.
+
 Read the skill file at `.agents/skills/review-pr/SKILL.md` and follow its instructions exactly.
 
 Do NOT comment on the PR on GitHub. Do NOT push any changes. This is a read-only review.
@@ -460,6 +466,12 @@ mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "4f363475-bf45-48
 
 {% elsif issue.state == "Prepare" %}
 ### Prepare Phase
+
+**Before starting work**, check this Linear issue for maintainer comments that may contain guidance, fix directions, or constraints. Query:
+```graphql
+query { issue(id: "{{ issue.id }}") { comments { nodes { body createdAt user { name } } } } }
+```
+If any comments contain fix guidance or specific instructions from the maintainer, incorporate them into your approach. Maintainer direction takes priority over review findings when they conflict.
 
 Read the skill file at `.agents/skills/prepare-pr/SKILL.md` and follow its instructions exactly.
 
