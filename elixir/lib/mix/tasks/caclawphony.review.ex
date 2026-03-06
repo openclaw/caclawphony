@@ -11,11 +11,13 @@ defmodule Mix.Tasks.Caclawphony.Review do
   Usage:
 
       mix caclawphony.review 34511 34554
+      mix caclawphony.review --direct 34511    # skip triage, go straight to review
       mix caclawphony.review --help
   """
 
+  @triage_state_id "0b100831-6a06-431d-848a-6d20980ec7e5"
   @review_state_id "2b76930f-a193-4b8f-ade5-97afed5414aa"
-  @project_id "07919ebc-b0f1-4f43-b6ac-84b9f3a22a93"
+  @project_id "07919ebc-e133-4c0c-82b9-ead654ec06a2"
   @team_key "MAR"
 
   @team_query """
@@ -48,7 +50,7 @@ defmodule Mix.Tasks.Caclawphony.Review do
   @impl Mix.Task
   def run(args) do
     {opts, pr_args, invalid} =
-      OptionParser.parse(args, strict: [help: :boolean], aliases: [h: :help])
+      OptionParser.parse(args, strict: [help: :boolean, direct: :boolean], aliases: [h: :help, d: :direct])
 
     cond do
       opts[:help] ->
@@ -65,6 +67,7 @@ defmodule Mix.Tasks.Caclawphony.Review do
 
         pr_numbers = Enum.map(pr_args, &parse_pr_number!/1)
         team_id = fetch_team_id!(@team_key)
+        state_id = if opts[:direct], do: @review_state_id, else: @triage_state_id
 
         Enum.each(pr_numbers, fn pr_number ->
           pr_title = fetch_pr_field!(pr_number, "title")
@@ -75,7 +78,7 @@ defmodule Mix.Tasks.Caclawphony.Review do
               title: "PR ##{pr_number}: #{pr_title}",
               description: build_description(pr_number, pr_title, pr_url),
               team_id: team_id,
-              state_id: @review_state_id,
+              state_id: state_id,
               project_id: @project_id
             })
 
@@ -98,7 +101,7 @@ defmodule Mix.Tasks.Caclawphony.Review do
         path -> path
       end
 
-    args = ["pr", "view", pr_number, "--json", field, "-q", ".#{field}"]
+    args = ["pr", "view", pr_number, "--repo", "openclaw/openclaw", "--json", field, "-q", ".#{field}"]
 
     case System.cmd(gh_path, args, stderr_to_stdout: true) do
       {value, 0} ->

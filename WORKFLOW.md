@@ -3,7 +3,7 @@ tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
   project_slug: d9873e6beee9
-  active_states: Backlog, Review, Prepare, Merge, Closure
+  active_states: Triage, Review, Prepare, Merge, Closure, Request Changes
   terminal_states: Done, Canceled, Duplicate
 
 polling:
@@ -14,17 +14,8 @@ workspace:
 
 hooks:
   after_create: |
-    # Backlog enrichment is lightweight -- just needs gh CLI, no repo clone
-    if [ "$SYMPHONY_ISSUE_STATE" = "Backlog" ]; then
-      echo "Backlog enrichment -- skipping repo clone"
-      exit 0
-    fi
-    if [ "$SYMPHONY_ISSUE_STATE" = "Closure" ]; then
-      echo "Closure agent -- just needs gh CLI, no repo clone"
-      exit 0
-    fi
-    git clone /Users/phaedrus/Projects/openclaw . 2>/dev/null || true
     # Copy skill files into workspace (resolving symlinks from maintainers repo)
+    # This runs for ALL states -- even lightweight ones need pr-cluster for triage
     SKILLS_SRC="/Users/phaedrus/Projects/maintainers/.agents/skills"
     SKILLS_DST=".agents/skills"
     if [ -d "$SKILLS_SRC" ]; then
@@ -37,14 +28,28 @@ hooks:
       # Copy PR_WORKFLOW.md if present
       [ -f "$SKILLS_SRC/PR_WORKFLOW.md" ] && cp "$SKILLS_SRC/PR_WORKFLOW.md" "$SKILLS_DST/" 2>/dev/null || true
     fi
+    # Triage enrichment is lightweight -- just needs gh CLI + skills, no repo clone
+    if [ "$SYMPHONY_ISSUE_STATE" = "Triage" ]; then
+      echo "Triage enrichment -- skipping repo clone"
+      exit 0
+    fi
+    if [ "$SYMPHONY_ISSUE_STATE" = "Closure" ]; then
+      echo "Closure agent -- just needs gh CLI, no repo clone"
+      exit 0
+    fi
+    if [ "$SYMPHONY_ISSUE_STATE" = "Request Changes" ]; then
+      echo "Request Changes agent -- just needs gh CLI, no repo clone"
+      exit 0
+    fi
+    git clone /Users/phaedrus/Projects/openclaw . 2>/dev/null || true
     # Extract PR number from issue title (format: "PR #1234: title" or "#1234")
     PR_NUM=$(echo "$SYMPHONY_ISSUE_TITLE" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
     if [ -n "$PR_NUM" ]; then
       gh pr checkout "$PR_NUM" --force 2>/dev/null || git checkout main
     fi
   before_run: |
-    # Backlog and Closure phases don't need repo operations
-    if [ "$SYMPHONY_ISSUE_STATE" = "Backlog" ] || [ "$SYMPHONY_ISSUE_STATE" = "Closure" ]; then
+    # Triage, Closure, and Request Changes phases don't need repo operations
+    if [ "$SYMPHONY_ISSUE_STATE" = "Triage" ] || [ "$SYMPHONY_ISSUE_STATE" = "Closure" ] || [ "$SYMPHONY_ISSUE_STATE" = "Request Changes" ]; then
       exit 0
     fi
     # Ensure we're on the right branch and up to date
@@ -94,7 +99,14 @@ gates:
     notify: true
 
 states:
+  backlog: "33710d02-89f4-4a7b-8b0c-075250c19b3e"
+  triage: "0b100831-6a06-431d-848a-6d20980ec7e5"
   todo: "0772f6b2-85fa-4c21-ab14-6705687d475f"
+  request_changes: "ca300fc0-0b39-496a-a969-fed20901996c"
+  review: "2b76930f-a193-4b8f-ade5-97afed5414aa"
+  review_complete: "4f363475-bf45-48a0-9466-c38eef79aded"
+  prepare: "42036e0f-29e1-4ece-9ab7-6dd0de1783f8"
+  prepare_complete: "0671e7cc-46b5-424e-aed3-d9408c9d3eb9"
   duplicate: "e0c34ba1-e3b3-4de1-b16b-51a7b1be6e4d"
   closure: "8279191b-e703-4d17-b5c0-16f17af7206f"
   done: "e085693d-8142-4671-9de5-20286fae8ec6"
@@ -132,7 +144,7 @@ Extract the PR number from the issue title (format: "PR #1234: title"). Use this
 
 ## Your Task
 
-{% if issue.state == "Backlog" %}
+{% if issue.state == "Triage" %}
 ### Triage / Enrichment Phase
 
 You are a PR triage agent for openclaw/openclaw. This issue contains a PR number or GitHub URL.
@@ -141,6 +153,26 @@ promote this PR to code review.
 
 Extract the PR number from the issue title or description (formats: "PR #1234: ...", "#1234",
 or a GitHub URL like "https://github.com/openclaw/openclaw/pull/1234").
+
+#### 0. Prior Review Check (Re-entry Detection)
+
+Before gathering data, check if this PR has previously had changes requested:
+```bash
+gh pr reviews <PR> --repo openclaw/openclaw --json state,submittedAt,author
+```
+
+If there is a `CHANGES_REQUESTED` review, check whether new commits exist after that review's `submittedAt` timestamp:
+```bash
+gh pr view <PR> --repo openclaw/openclaw --json commits --jq '.commits[-1].committedDate'
+```
+
+If the latest commit is **after** the review timestamp: note "Author has pushed updates since changes were requested — prior findings may be addressed. Re-triage accordingly."
+
+If the latest commit is **before** the review timestamp: note "Changes still outstanding from prior review — PR not ready for re-review." Set recommendation to WAIT unless the PR has been otherwise updated.
+
+Include this finding in your assessment under a "Prior Review Status" line in Vital Signs.
+
+---
 
 Gather data using `gh` CLI, then produce an assessment with the following sections:
 
@@ -211,16 +243,16 @@ Recommendation labels (always apply exactly one):
 
 #### 7. Cluster Detection
 
-Run this command to load cached cluster data:
+**Step 1:** Refresh the local PR cache (incremental — fast if cache exists):
 ```bash
-/Users/phaedrus/Projects/maintainers/scripts/pr-plan --use-cache --out /Users/phaedrus/Projects/maintainers/.local/pr-plan
+/Users/phaedrus/Projects/maintainers/scripts/pr-plan --live --out /Users/phaedrus/Projects/maintainers/.local/pr-plan
 ```
 
-Inspect:
-- `/Users/phaedrus/Projects/maintainers/.local/pr-plan/clusters.json`
-- `/Users/phaedrus/Projects/maintainers/.local/pr-plan/cluster-refinements.json`
+**Step 2:** Run the pr-cluster skill for this specific PR to find related/duplicate PRs:
+Follow the instructions in `.agents/skills/pr-cluster/SKILL.md` to search for clusters around PR `<PR#>`.
+The skill uses multi-signal GitHub API search (scope, keywords, files, linked issues) for precise per-PR clustering.
 
-Find whether the current PR number appears in any cluster.
+Combine results from both sources — the pr-plan clusters.json and the pr-cluster skill output — to build the full cluster picture.
 
 If the PR is in a cluster with medium or high confidence:
 1. For each cluster member, fetch metadata:
@@ -235,48 +267,120 @@ gh pr view <N> --repo openclaw/openclaw --json number,title,state,createdAt,upda
    - Fresher (more recently updated)
    - Smaller and more focused
    - Has reviews or approvals
-3. If canonical PR differs from this issue's PR number, update this issue title to reference the canonical PR number.
-4. For each non-canonical PR, create a Linear issue in Duplicate state, then relate it to this canonical issue.
+   - **Final tiebreaker: lowest PR number wins** (deterministic — every agent reaches the same answer)
 
-Create duplicate issues:
-```graphql
-mutation {
-  issueCreate(input: {
-    teamId: "2d3d9f55-ef35-47cc-a820-aeeb61399256"
-    title: "PR #XXXX: <title> (duplicate of #CANONICAL)"
-    description: "Duplicate of IDENTIFIER. This PR is part of a cluster and will be reviewed for closure after the canonical PR merges."
-    stateId: "{{ states.duplicate }}"
-    projectId: "07919ebc-e133-4c0c-82b9-ead654ec06a2"
-  }) {
-    success
-    issue { id identifier }
-  }
-}
-```
+3. **If this issue's PR IS the canonical PR:**
+   - For each non-canonical cluster member, check if a Linear issue already exists for it:
+     ```bash
+     # Search by PR number in issue titles
+     ```
+     ```graphql
+     query {
+       project(id: "07919ebc-e133-4c0c-82b9-ead654ec06a2") {
+         issues(filter: { title: { contains: "#XXXX" } }) {
+           nodes { id identifier title state { name } }
+         }
+       }
+     }
+     ```
+   - If a Linear issue exists: create a `duplicates` relation between it and this issue.
+   - If no Linear issue exists: create one in Duplicate state, then relate it.
 
-Create relation (and verify it was persisted):
-```graphql
-mutation {
-  issueRelationCreate(input: {
-    issueId: "<new_duplicate_issue_id>"
-    relatedIssueId: "{{ issue.id }}"
-    type: duplicates
-  }) {
-    success
-    issueRelation { id }
-  }
-}
-```
+   Create duplicate issues (only if no existing issue found):
+   ```graphql
+   mutation {
+     issueCreate(input: {
+       teamId: "2d3d9f55-ef35-47cc-a820-aeeb61399256"
+       title: "[#XXXX] <title>"
+       description: "**PR:** [openclaw/openclaw#XXXX](https://github.com/openclaw/openclaw/pull/XXXX)\n**Author:** @username (ASSOCIATION)\n\n<1-2 sentence summary>"
+       stateId: "{{ states.duplicate }}"
+       projectId: "07919ebc-e133-4c0c-82b9-ead654ec06a2"
+     }) {
+       success
+       issue { id identifier }
+     }
+   }
+   ```
 
-**Verify each relation was created** by querying back:
-```graphql
-query {
-  issue(id: "{{ issue.id }}") {
-    relations { nodes { type relatedIssue { identifier } } }
-  }
-}
-```
-If any expected relations are missing, retry `issueRelationCreate`. Do not proceed until all duplicate relations are confirmed.
+   Then add a duplicate assessment comment on each created issue:
+   ```graphql
+   mutation {
+     commentCreate(input: {
+       issueId: "<duplicate_issue_id>"
+       body: "## Duplicate Assessment\n\n**This PR (#XXXX)** — <1-sentence summary>. <N> files changed, +X/-Y.\n\n**Canonical PR: {{ issue.identifier }} [#YYYY](https://github.com/openclaw/openclaw/pull/YYYY)** — `<canonical title>`. Status: <MERGEABLE/CONFLICTING>.\n\n### Why #YYYY is preferred:\n\n- <concrete reasons>\n\n### What #XXXX has that #YYYY may not:\n\n- <unique fixes/edge cases, or 'Nothing — canonical PR fully subsumes this one.'>"
+     }) { success }
+   }
+   ```
+
+   Create relation (and verify it was persisted):
+   ```graphql
+   mutation {
+     issueRelationCreate(input: {
+       issueId: "<duplicate_issue_id>"
+       relatedIssueId: "{{ issue.id }}"
+       type: duplicates
+     }) {
+       success
+       issueRelation { id }
+     }
+   }
+   ```
+
+   **Verify each relation was created** by querying back:
+   ```graphql
+   query {
+     issue(id: "{{ issue.id }}") {
+       relations { nodes { type relatedIssue { identifier } } }
+     }
+   }
+   ```
+   If any expected relations are missing, retry `issueRelationCreate`. Do not proceed until all duplicate relations are confirmed.
+
+4. **If this issue's PR is NOT the canonical PR:**
+   - Check if a Linear issue already exists for the canonical PR (search by PR number as above).
+   - If yes: create a `duplicates` relation from this issue to the canonical issue, then move **this issue** to Duplicate state.
+   - If no: create a new Linear issue for the canonical PR in Triage state (so it gets enriched immediately), relate this issue to it as a duplicate, then move **this issue** to Duplicate state.
+
+   Create canonical PR issue in Triage:
+   ```graphql
+   mutation {
+     issueCreate(input: {
+       teamId: "2d3d9f55-ef35-47cc-a820-aeeb61399256"
+       title: "[#XXXX] <canonical PR's title>"
+       description: "**PR:** [openclaw/openclaw#XXXX](https://github.com/openclaw/openclaw/pull/XXXX)\n**Author:** @username (ASSOCIATION)\n\n<1-2 sentence summary>"
+       stateId: "{{ states.triage }}"
+       projectId: "07919ebc-e133-4c0c-82b9-ead654ec06a2"
+     }) {
+       success
+       issue { id identifier }
+     }
+   }
+   ```
+
+   - **Before moving to Duplicate**, add a comment explaining the duplicate assessment:
+
+   ```graphql
+   mutation {
+     commentCreate(input: {
+       issueId: "{{ issue.id }}"
+       body: "## Duplicate Assessment\n\n**This PR (#XXXX)** — <1-sentence summary>. <N> files changed, +X/-Y.\n\n**Canonical PR: [#YYYY](https://github.com/openclaw/openclaw/pull/YYYY)** — `<canonical title>` by @author. <N> files changed, +X/-Y. Status: <MERGEABLE/CONFLICTING>.\n\n### Why #YYYY is preferred over #XXXX:\n\n- <concrete reasons: mergeable vs conflicting, broader scope, fresher, better tests, etc.>\n\n### What #XXXX has that #YYYY may not:\n\n- <any unique fixes or edge cases worth checking during canonical PR review, or 'Nothing — canonical PR fully subsumes this one.'>"
+     }) { success }
+   }
+   ```
+
+   This assessment is critical — it preserves the reasoning for future review of the canonical PR and ensures unique fixes don't get lost.
+
+   - **Then stop** — do not proceed to the final metadata update. The canonical PR's issue will handle enrichment.
+
+   Move self to Duplicate:
+   ```graphql
+   mutation {
+     issueUpdate(id: "{{ issue.id }}", input: {
+       title: "[#XXXX] <this PR's title>"
+       stateId: "{{ states.duplicate }}"
+     }) { success }
+   }
+   ```
 
 5. Include cluster info in your assessment comment: members, canonical PR, and canonical selection rationale.
 
@@ -305,17 +409,27 @@ mutation {
 
 **Step 2: Update the issue metadata in a single mutation (this MUST be last -- it triggers a state transition that ends your session):**
 
-1. **Title** -> `[RECOMMENDATION] PR #XXXX: <original title>`
-2. **State** -> Todo (`{{ states.todo }}`)
-3. **Priority** -> integer from the table above
-4. **Estimate** -> Fibonacci complexity from the table above
-5. **Labels** -> one recommendation label + all matching subsystem labels (array of IDs)
-6. **Assignee** -> `{{ gates.review_complete.assignee }}` (maintainer -- for human review gate)
+1. **Title** -> `[#XXXX] <PR title>` (stable format — PR number is the identity, recommendation lives in labels)
+2. **Description** -> A short description block with PR link, author, and summary (see format below)
+3. **State** -> Todo (`{{ states.todo }}`)
+4. **Priority** -> integer from the table above
+5. **Estimate** -> Fibonacci complexity from the table above
+6. **Labels** -> one recommendation label + all matching subsystem labels (array of IDs)
+7. **Assignee** -> `{{ gates.review_complete.assignee }}` (maintainer -- for human review gate)
+
+Description format (markdown):
+```
+**PR:** [openclaw/openclaw#1234](https://github.com/openclaw/openclaw/pull/1234)
+**Author:** @username (FIRST_TIME_CONTRIBUTOR | CONTRIBUTOR | MEMBER | etc.)
+
+<1-2 sentence summary of what the PR does>
+```
 
 ```graphql
 mutation {
   issueUpdate(id: "{{ issue.id }}", input: {
-    title: "[REVIEW] PR #1234: fix streaming response"
+    title: "[#1234] fix streaming response"
+    description: "**PR:** [openclaw/openclaw#1234](https://github.com/openclaw/openclaw/pull/1234)\n**Author:** @username (CONTRIBUTOR)\n\nFixes streaming response handling by adding proper buffer flushing on connection close."
     stateId: "{{ states.todo }}"
     priority: 2
     estimate: 3
@@ -368,7 +482,16 @@ mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "0671e7cc-46b5-42
 
 Read the skill file at `.agents/skills/merge-pr/SKILL.md` and follow its instructions exactly.
 
-**When finished**, do these steps IN THIS ORDER (comment first, state transition last):
+**If merge-verify or merge-run fails** (conflicts, mainline drift, head mismatch, CI failure, etc.):
+
+1. **Post a comment** on this Linear issue explaining what failed and why (include the error output).
+2. **Move the issue back to Prepare** so the PR gets rebased and re-gated:
+```graphql
+mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "42036e0f-29e1-4ece-9ab7-6dd0de1783f8" }) { success } }
+```
+Do NOT retry the merge yourself. Stop after the state transition.
+
+**When merge succeeds**, do these steps IN THIS ORDER (comment first, state transition last):
 
 1. **Post a summary comment** on this Linear issue with:
    - Merge commit SHA
@@ -414,20 +537,53 @@ mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "e085693d-8142-46
 {% elsif issue.state == "Closure" %}
 ### Closure Phase
 
-The Closure agent closes a duplicate or superseded PR on GitHub.
+Close a PR on GitHub. The reason may vary — duplicate, superseded, stale, or not useful.
 
-1. Extract the duplicate PR number from this issue title.
-2. Read this issue description and comments to understand closure context.
-3. Find the canonical or superseding PR from related issues.
-4. Check canonical PR status with `gh`.
-5. Draft a GitHub closing comment:
-   - If canonical PR is merged, mention the canonical PR and merge commit SHA.
-   - If canonical PR is still open, state this PR is a duplicate and reference the canonical PR.
-6. Post the closing comment with `gh pr comment`.
-7. Close the duplicate PR with `gh pr close`.
-8. Post a confirmation comment on this Linear issue.
+#### Step 1: Gather context
 
-9. Then transition this issue to Done (this MUST be last -- it ends your session):
+1. Extract the PR number from this issue title.
+2. Read **all comments on this Linear issue** to understand why it's being closed.
+3. Check for **related Linear issues** (duplicates, canonical PRs):
+```graphql
+query {
+  issue(id: "{{ issue.id }}") {
+    relations { nodes { type relatedIssue { id identifier title state { name } } } }
+  }
+}
+```
+4. Check the PR status on GitHub:
+```bash
+gh pr view <PR> --repo openclaw/openclaw --json state,mergedBy,mergeCommit,title
+```
+
+#### Step 2: Determine closure reason
+
+From the context gathered, classify the closure:
+
+| Reason | Signal | Comment tone |
+|--------|--------|-------------|
+| **Duplicate** | Related Linear issue with canonical PR | "This is addressed by #CANONICAL (merged as COMMIT / still open)" |
+| **Superseded** | Review comments mention a merged PR or upstream commit that covers this | "This has been addressed upstream via #PR / commit SHA" |
+| **Stale** | PR is old, conflicting, author inactive | "Closing as stale — feel free to reopen against current main" |
+| **Not useful** | Review recommends SKIP/CLOSE, no redeeming value | "Closing — [brief reason from review]. Thank you for the contribution" |
+
+Always be respectful. Thank the contributor.
+
+#### Step 3: Close the PR
+
+1. Post the closing comment:
+```bash
+gh pr comment <PR> --repo openclaw/openclaw --body "<closing comment>"
+```
+2. Close the PR:
+```bash
+gh pr close <PR> --repo openclaw/openclaw
+```
+
+#### Step 4: Wrap up
+
+1. Post a confirmation comment on this Linear issue summarizing what was done.
+2. Then transition this issue to Done (this MUST be last — it ends your session):
 ```graphql
 mutation {
   issueUpdate(id: "{{ issue.id }}", input: { stateId: "{{ states.done }}" }) {
@@ -436,11 +592,71 @@ mutation {
 }
 ```
 
+{% elsif issue.state == "Request Changes" %}
+### Request Changes Phase
+
+Post a GitHub code review requesting changes from the PR author, based on findings from the review phase.
+
+#### Step 1: Gather review findings
+
+1. Extract the PR number from this issue title.
+2. Read **all comments on this Linear issue** — especially the review phase comment that contains findings.
+3. Identify findings classified as **author-required** — these are issues the maintainer decided can't be fixed mechanically by prepare-pr:
+   - Fundamental design/approach problems
+   - Changes that need to be split into separate PRs
+   - Domain knowledge the author has but we don't
+   - Bundled unrelated changes
+
+#### Step 2: Draft the review comment
+
+Write a clear, actionable, respectful GitHub review comment. Structure:
+
+```
+## Changes Requested
+
+Thank you for this contribution! We've reviewed this PR and have some feedback before it can move forward.
+
+### [Finding 1 title]
+[Clear explanation of what needs to change and why]
+
+### [Finding 2 title]
+[Clear explanation]
+
+---
+
+Once these are addressed, we'll re-review. Feel free to ask questions if anything is unclear.
+```
+
+Guidelines:
+- Be specific about what needs to change
+- Explain *why*, not just *what*
+- Suggest concrete approaches where possible
+- Thank the contributor
+- Keep it concise — no need to repeat the full review
+
+#### Step 3: Post the review on GitHub
+
+```bash
+gh pr review <PR> --repo openclaw/openclaw --request-changes --body "<review comment>"
+```
+
+#### Step 4: Move to Backlog
+
+1. Post a confirmation comment on this Linear issue summarizing what was posted.
+2. Then move the issue to Backlog (this MUST be last — it ends your session):
+```graphql
+mutation {
+  issueUpdate(id: "{{ issue.id }}", input: {
+    stateId: "{{ states.backlog }}"
+  }) { success }
+}
+```
+
 {% endif %}
 
 ## Rules
 
-{% if issue.state != "Closure" %}
+{% if issue.state != "Closure" and issue.state != "Request Changes" %}
 - **Never comment on the PR on GitHub** -- no PR comments, no review submissions
 {% endif %}
 - **Never delete the worktree** -- it persists across pipeline stages
