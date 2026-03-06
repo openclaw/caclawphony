@@ -1,40 +1,86 @@
-# Symphony
+# Caclawphony
 
-Symphony turns project work into isolated, autonomous implementation runs, allowing teams to manage
-work instead of supervising coding agents.
+Caclawphony is an automated PR triage, review, and merge pipeline for [openclaw/openclaw](https://github.com/openclaw/openclaw). It connects a Linear project board to coding agents (Codex) via [Symphony](https://github.com/openai/symphony), turning each PR into a tracked issue that flows through a multi-stage pipeline with human gates between stages.
 
-[![Symphony demo video preview](.github/media/symphony-demo-poster.jpg)](.github/media/symphony-demo.mp4)
-
-_In this [demo video](.github/media/symphony-demo.mp4), Symphony monitors a Linear board for work and spawns agents to handle the tasks. The agents complete the tasks and provide proof of work: CI status, PR review feedback, complexity analysis, and walkthrough videos. When accepted, the agents land the PR safely. Engineers do not need to supervise Codex; they can manage the work at a higher level._
+[📺 Demo video](https://drive.google.com/file/d/1QsTwj9oLY9FlceI3TT_AEVBXFvy31dtd/view)
 
 > [!WARNING]
-> Symphony is a low-key engineering preview for testing in trusted environments.
+> This is a maintainer tool for openclaw/openclaw — not a general-purpose framework.
 
-## Running Symphony
+## How It Works
+
+PRs are imported into Linear via `mix caclawphony.review <PR#>`, which creates an issue in the **Triage** state. Symphony polls Linear for issues in active states and dispatches Codex agents to handle each stage. Human gates between stages let the maintainer review agent output before advancing.
+
+### Pipeline States
+
+```
+Triage → Todo → Review → Review Complete → Prepare → Prepare Complete → Merge → Done
+                              ↓                                           
+                       Request Changes → Backlog → (re-entry via Triage)
+                              
+                           Closure → Done/Duplicate
+```
+
+| State | Type | What Happens |
+|-------|------|-------------|
+| **Triage** | Agent | Enrichment, cluster detection, duplicate identification, vital signs. Lightweight — no repo clone needed. |
+| **Todo** | Human gate | Maintainer reviews triage output, decides next step. |
+| **Review** | Agent | Full PR review using `review-pr` skill. Produces structured findings. |
+| **Review Complete** | Human gate | Maintainer reviews findings. Routes to Prepare, Request Changes, or Closure. |
+| **Prepare** | Agent | Rebases, fixes BLOCKER/IMPORTANT findings, runs gates, pushes. Max 1 at a time (resource constraint). |
+| **Prepare Complete** | Human gate | Maintainer verifies prepare output. |
+| **Merge** | Agent | Deterministic squash merge with attribution and co-author trailers. |
+| **Request Changes** | Agent | Posts `gh pr review --request-changes` on GitHub, moves issue to Backlog to wait for author. |
+| **Closure** | Agent | Closes PR on GitHub with appropriate comment (duplicate, superseded, stale, or not useful). |
+| **Done** | Terminal | PR merged or closed. |
+| **Duplicate** | Terminal | PR identified as duplicate of a canonical PR. Includes structured assessment comment. |
+
+### Key Design Decisions
+
+- **GitHub is source of truth for review status.** Triage agents check `gh pr reviews` for prior CHANGES_REQUESTED reviews and whether the author has pushed new commits since.
+- **Human gates are explicit.** Moving an issue to Request Changes IS the approval to comment on the PR. Agents never comment on GitHub without being in an authorized state.
+- **Duplicates get assessments.** When a PR is marked as duplicate, a structured comment explains why the canonical PR is preferred and what unique fixes might be lost.
+- **Cluster detection uses multi-signal search.** Triage runs `pr-plan --live` to refresh the PR cache, then `pr-cluster` for per-PR search across scope, keywords, files, and linked issues.
+
+## Setup
 
 ### Requirements
 
-Symphony works best in codebases that have adopted
-[harness engineering](https://openai.com/index/harness-engineering/). Symphony is the next step --
-moving from managing coding agents to managing work that needs to get done.
+- Elixir + Mix
+- Linear workspace with a project board
+- GitHub CLI (`gh`) authenticated
+- Codex CLI
+- `LINEAR_API_KEY` environment variable
 
-### Option 1. Make your own
+### Import PRs
 
-Tell your favorite coding agent to build Symphony in a programming language of your choice:
+```bash
+cd elixir
+LINEAR_API_KEY=<key> mix caclawphony.review <PR#> [<PR#> ...]
+```
 
-> Implement Symphony according to the following spec:
-> https://github.com/openai/symphony/blob/main/SPEC.md
+This creates Linear issues in **Triage** state. Use `--direct` to skip enrichment and go straight to **Review**.
 
-### Option 2. Use our experimental reference implementation
+### Run Symphony
 
-Check out [elixir/README.md](elixir/README.md) for instructions on how to set up your environment
-and run the Elixir-based Symphony implementation. You can also ask your favorite coding agent to
-help with the setup:
+```bash
+cd elixir
+LINEAR_API_KEY=<key> mix run --no-halt
+```
 
-> Set up Symphony for my repository based on
-> https://github.com/openai/symphony/blob/main/elixir/README.md
+Symphony polls Linear every 30 seconds, picks up issues in active states, and dispatches Codex agents.
 
----
+## Architecture
+
+Caclawphony is built on [Symphony](https://github.com/openai/symphony) — a framework for turning project management boards into autonomous agent dispatch systems. The workflow configuration lives in [`WORKFLOW.md`](elixir/WORKFLOW.md), which defines:
+
+- **Active and terminal states** — which Linear states trigger agent dispatch
+- **Hooks** — `after_create` (workspace setup, skill copy, repo clone) and `before_run` (branch checkout)
+- **Gates** — human checkpoints that assign the issue back to the maintainer and notify
+- **Templates** — Jinja-style prompts per state, with access to issue metadata and state IDs
+- **Rules** — global constraints (e.g., never comment on GitHub except in Request Changes state)
+
+See [`SPEC.md`](SPEC.md) for the full Symphony specification and [`elixir/README.md`](elixir/README.md) for Elixir-specific setup.
 
 ## License
 
