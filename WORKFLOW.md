@@ -548,7 +548,7 @@ openclaw gateway restart
    - What findings were fixed
    - Gate results (pass/fail)
    - Push status
-   - Test plan risk tier and summary (e.g., "GREEN — 3 test steps, all CLI-verifiable")
+   - **Full test plan** — include the complete `.local/test-plan.md` content in the comment (risk tier, what changed, all test steps with exact commands, rollback). Do NOT summarize it to a one-liner — the maintainer reads this comment to decide whether to test and merge.
 
 2. **Then transition this issue** to Prepare Complete (this MUST be last -- it ends your session):
 ```
