@@ -542,6 +542,74 @@ openclaw gateway restart
 - Each test should be independently executable (no ordering dependencies where possible)
 - Include `gateway restart` after config changes that require it
 
+#### Generate Test Kit (if applicable)
+
+If the PR has **API-observable behavioral changes** (gateway methods, config effects, session behavior, CLI output, tool responses), also generate executable test scripts in `.local/test-kit/`.
+
+**Skip this section** for PRs that are pure refactors, docs-only, UI/TUI-only, or provider-specific with no local testability.
+
+**Structure:**
+
+```
+.local/test-kit/
+├── README.md              # What these scripts test, how to run them
+├── common.sh              # Shared helpers (see template below)
+├── 01-test-<scenario>.sh  # One script per test scenario
+├── 02-test-<scenario>.sh
+└── 90-cleanup.sh          # Teardown / restore
+```
+
+**common.sh template** — source test-gateway.sh from caclawphony and provide helpers:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT="${TEST_GW_PORT:-18790}"
+BASE_URL="http://127.0.0.1:$PORT"
+
+# Call a gateway API method
+gw_call() {
+  local method="$1"
+  local params="${2:-{\}}"
+  curl -sf "$BASE_URL/api" \
+    -H 'Content-Type: application/json' \
+    -d "{\"method\": \"$method\", \"params\": $params}"
+}
+
+# Assert a jq expression against JSON input
+assert_jq() {
+  local desc="$1" filter="$2" input="$3"
+  if echo "$input" | jq -e "$filter" >/dev/null 2>&1; then
+    echo "  ✓ $desc"
+  else
+    echo "  ✗ $desc"
+    echo "    Filter: $filter"
+    echo "    Input: $(echo "$input" | jq -c . 2>/dev/null || echo "$input")"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+FAILURES=0
+trap 'if (( FAILURES > 0 )); then echo ""; echo "$FAILURES assertion(s) failed"; exit 1; fi' EXIT
+```
+
+**Each numbered test script should:**
+1. Source `common.sh`
+2. Set up preconditions (config patches, session creation)
+3. Run the behavior under test
+4. Assert expected outcomes with `assert_jq`
+5. Clean up its own state (restore config, delete test sessions)
+6. Use disposable session keys like `agent:main:test-<pr>-<scenario>`
+
+**Guidelines:**
+- Use `jq -e '...'` for assertions — never compare against jq's `empty` generator (use `== null` or `== 0`)
+- Each script must be independently runnable (no ordering dependencies)
+- Scripts target whatever gateway is on `$TEST_GW_PORT` — they don't manage the gateway lifecycle
+- Include a brief description comment at the top of each script explaining what it validates
+- Test the **new** behavior, not the old behavior (don't write tests that pass on main)
+
 **When finished**, do these steps IN THIS ORDER (comment first, state transition last):
 
 1. **Post a summary comment** on this Linear issue with:
@@ -549,6 +617,17 @@ openclaw gateway restart
    - Gate results (pass/fail)
    - Push status
    - **Full test plan** — include the complete `.local/test-plan.md` content in the comment (risk tier, what changed, all test steps with exact commands, rollback). Do NOT summarize it to a one-liner — the maintainer reads this comment to decide whether to test and merge.
+   - **Test kit location** (if generated) — include the worktree path, e.g.:
+     ```
+     ## Test Kit
+     Executable test scripts are at:
+       <worktree-path>/.local/test-kit/
+     
+     To run:
+       test-gateway.sh start <worktree-path>
+       cd <worktree-path>/.local/test-kit && bash 01-test-*.sh
+       test-gateway.sh stop
+     ```
 
 2. **Then transition this issue** to Prepare Complete (this MUST be last -- it ends your session):
 ```
