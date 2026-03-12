@@ -486,12 +486,6 @@ Read the skill file at `.agents/skills/prepare-pr/SKILL.md` and follow its instr
 
 The `.local/review.md` and `.local/review.json` from the review phase should already be in this workspace.
 
-**Important:** When running gates, use `--no-test` to skip the full test suite:
-```bash
-scripts/pr-prepare gates <PR> --no-test
-```
-This runs build + check + changelog validation only. The full test suite is deferred to the separate Test phase to avoid resource pressure during fix+gate cycles.
-
 **When finished**, do these steps IN THIS ORDER (comment first, state transition last):
 
 1. **Post a summary comment** on this Linear issue with:
