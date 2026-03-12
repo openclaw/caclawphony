@@ -3,7 +3,7 @@ tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
   project_slug: d9873e6beee9
-  active_states: Triage, Review, Prepare, Merge, Closure, Request Changes
+  active_states: Triage, Review, Prepare, Test, Merge, Closure, Request Changes
   terminal_states: Done, Canceled, Duplicate
 
 polling:
@@ -68,6 +68,7 @@ agent:
   continuation_delay_ms: 1000
   max_concurrent_agents_by_state:
     prepare: 1
+    test: 1
 
 codex:
   command: codex app-server
@@ -86,6 +87,7 @@ notifications:
   gate_states:
     - Review Complete
     - Prepare Complete
+    - Pre-merge
   template: "{{ issue.identifier }}: moved to {{ issue.state }}. Review results in workspace."
 
 gates:
@@ -95,6 +97,10 @@ gates:
     notify: true
   prepare_complete:
     state_id: "0671e7cc-46b5-424e-aed3-d9408c9d3eb9"
+    assignee: "5bbd2a49-0fde-4fdd-b265-f6991c718e87"
+    notify: true
+  pre_merge:
+    state_id: "3f6e88cf-0d4b-430d-bad1-19ccdf124b3a"
     assignee: "5bbd2a49-0fde-4fdd-b265-f6991c718e87"
     notify: true
 
@@ -107,6 +113,8 @@ states:
   review_complete: "4f363475-bf45-48a0-9466-c38eef79aded"
   prepare: "42036e0f-29e1-4ece-9ab7-6dd0de1783f8"
   prepare_complete: "0671e7cc-46b5-424e-aed3-d9408c9d3eb9"
+  test: "591e5db0-b66e-4970-a3ea-68ba5f7b87a0"
+  pre_merge: "3f6e88cf-0d4b-430d-bad1-19ccdf124b3a"
   duplicate: "e0c34ba1-e3b3-4de1-b16b-51a7b1be6e4d"
   closure: "8279191b-e703-4d17-b5c0-16f17af7206f"
   done: "e085693d-8142-4671-9de5-20286fae8ec6"
@@ -632,6 +640,84 @@ trap 'if (( FAILURES > 0 )); then echo ""; echo "$FAILURES assertion(s) failed";
 2. **Then transition this issue** to Prepare Complete (this MUST be last -- it ends your session):
 ```
 mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "0671e7cc-46b5-424e-aed3-d9408c9d3eb9", assigneeId: "5bbd2a49-0fde-4fdd-b265-f6991c718e87" }) { success } }
+```
+
+{% elsif issue.state == "Test" %}
+### Test Phase
+
+Run the full test suite against the prepared PR branch. This phase is intentionally separate from Prepare to avoid resource pressure during fix+gate cycles.
+
+**Before starting work**, check this Linear issue for maintainer comments that may contain test guidance or scope restrictions. Query:
+```graphql
+query { issue(id: "{{ issue.id }}") { comments { nodes { body createdAt user { name } } } } }
+```
+
+#### Step 1: Identify the PR and branch
+
+Extract the PR number from the issue title. The prepare phase should have left a prep branch:
+```bash
+PR_NUM=<extracted PR number>
+git fetch origin
+git checkout "pr-${PR_NUM}-prep" 2>/dev/null || gh pr checkout "$PR_NUM" --force
+```
+
+#### Step 2: Run the full test suite
+
+```bash
+pnpm test 2>&1 | tee .local/test-results.txt
+TEST_EXIT=$?
+```
+
+If the test suite exits non-zero, analyze the failures:
+- Are they **pre-existing** (known flakes, Windows-only, provider-specific)? Note them but don't block.
+- Are they **introduced by this PR**? These are blockers.
+
+To distinguish, check if the same tests fail on main:
+```bash
+git stash
+git checkout main
+pnpm test -- --grep "<failing test name>" 2>&1 | tee .local/test-baseline.txt
+git checkout -
+git stash pop
+```
+
+#### Step 3: Run the test kit (if present)
+
+If `.local/test-kit/` exists from the prepare phase:
+```bash
+if [ -d ".local/test-kit" ]; then
+  for script in .local/test-kit/[0-9]*.sh; do
+    echo "=== Running $script ==="
+    bash "$script" 2>&1
+  done | tee .local/test-kit-results.txt
+fi
+```
+
+#### Step 4: Generate test report
+
+Create `.local/test-report.md` with:
+- Overall pass/fail status
+- Number of tests run, passed, failed, skipped
+- For any failures: whether they're pre-existing or PR-introduced
+- Test kit results (if applicable)
+- Recommendation: PASS (safe to merge) or FAIL (needs fixes — send back to Prepare)
+
+#### Step 5: Post results and transition
+
+**If tests PASS** (no PR-introduced failures):
+
+1. Post a summary comment on this Linear issue with the test report.
+2. Transition to Pre-merge (human gate):
+```graphql
+mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "{{ states.pre_merge }}", assigneeId: "{{ gates.pre_merge.assignee }}" }) { success } }
+```
+
+**If tests FAIL** (PR-introduced failures):
+
+1. Post a detailed failure comment on this Linear issue with failing tests, stack traces, and analysis.
+2. Move back to Prepare for fixes:
+```graphql
+mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "{{ states.prepare }}" }) { success } }
 ```
 
 {% elsif issue.state == "Merge" %}
