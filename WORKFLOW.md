@@ -3,7 +3,7 @@ tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
   project_slug: d9873e6beee9
-  active_states: Triage, Review, Prepare, Test, Merge, Closure, Request Changes
+  active_states: Triage, Review, Prepare, Test, Merge, Closure, Request Changes, Rebase
   terminal_states: Done, Canceled, Duplicate
 
 polling:
@@ -116,6 +116,7 @@ states:
   test: "591e5db0-b66e-4970-a3ea-68ba5f7b87a0"
   pre_merge: "3f6e88cf-0d4b-430d-bad1-19ccdf124b3a"
   duplicate: "e0c34ba1-e3b3-4de1-b16b-51a7b1be6e4d"
+  rebase: "de50ceb9-a0ef-4f13-849f-bf31a65392ee"
   closure: "8279191b-e703-4d17-b5c0-16f17af7206f"
   done: "e085693d-8142-4671-9de5-20286fae8ec6"
 
@@ -630,6 +631,73 @@ mutation {
 2. **Then transition this issue** to Done (this MUST be last -- it ends your session):
 ```
 mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "e085693d-8142-4671-9de5-20286fae8ec6" }) { success } }
+```
+
+{% elsif issue.state == "Rebase" %}
+### Rebase Phase
+
+Lightweight rebase of the PR branch onto current main. No review, no gates, no tests -- just bring the branch up to date.
+
+#### Step 1: Identify the PR
+
+Extract the PR number from the issue title (format: `PR #1234` or `[#1234]`).
+
+```bash
+PR_NUM=<extracted PR number>
+```
+
+#### Step 2: Fetch and rebase
+
+```bash
+git fetch origin
+git checkout main && git pull origin main
+gh pr checkout "$PR_NUM" --force
+git rebase origin/main
+```
+
+#### Step 3: Handle conflicts
+
+**If the rebase is clean** (no conflicts), proceed to Step 4.
+
+**If there are conflicts**, attempt to resolve them:
+
+- **Mechanical conflicts** (import ordering, adjacent-line edits, CHANGELOG.md collisions, lockfile regeneration): resolve automatically, `git add` the resolved files, `git rebase --continue`.
+- **Semantic conflicts** (both sides changed the same logic, function signatures changed, structural rewrites): do NOT guess. Abort the rebase (`git rebase --abort`) and report the conflicts in detail.
+
+If you resolved conflicts, verify the result compiles:
+```bash
+pnpm build 2>&1 | tail -20
+```
+
+If build fails after conflict resolution, abort and report.
+
+#### Step 4: Force push
+
+```bash
+git push --force-with-lease
+```
+
+If push fails (fork permissions, protected branch), try the GraphQL `updateRef` fallback:
+```bash
+BRANCH=$(gh pr view "$PR_NUM" --json headRefName -q .headRefName)
+NEW_SHA=$(git rev-parse HEAD)
+REPO=$(gh pr view "$PR_NUM" --json headRepository -q '.headRepository.owner.login + "/" + .headRepository.name')
+gh api graphql -f query="mutation { updateRef(input: { refId: \"refs/heads/$BRANCH\", oid: \"$NEW_SHA\" }) { clientMutationId } }" --hostname github.com
+```
+
+#### Step 5: Report and transition
+
+**When finished**, do these steps IN THIS ORDER (comment first, state transition last):
+
+1. **Post a summary comment** on this Linear issue with:
+   - Whether the rebase was clean or required conflict resolution
+   - Which files had conflicts (if any) and how they were resolved
+   - New HEAD SHA after force push
+   - If rebase was aborted: detailed conflict report (which files, what kind of conflict)
+
+2. **Then transition this issue** to Todo (this MUST be last -- it ends your session):
+```
+mutation { issueUpdate(id: "{{ issue.id }}", input: { stateId: "0772f6b2-85fa-4c21-ab14-6705687d475f", assigneeId: "5bbd2a49-0fde-4fdd-b265-f6991c718e87" }) { success } }
 ```
 
 {% elsif issue.state == "Closure" %}
