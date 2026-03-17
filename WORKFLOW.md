@@ -14,30 +14,34 @@ workspace:
 
 hooks:
   after_create: |
-    # Copy skill files into workspace (resolving symlinks from maintainers repo)
-    # This runs for ALL states -- even lightweight ones need pr-cluster for triage
-    SKILLS_SRC="/Users/phaedrus/Projects/maintainers/.agents/skills"
-    SKILLS_DST=".agents/skills"
-    if [ -d "$SKILLS_SRC" ]; then
-      mkdir -p "$SKILLS_DST"
-      for skill in review-pr prepare-pr merge-pr pr-cluster; do
-        if [ -d "$SKILLS_SRC/$skill" ]; then
-          cp -RL "$SKILLS_SRC/$skill" "$SKILLS_DST/" 2>/dev/null || true
-        fi
-      done
-      # Copy PR_WORKFLOW.md if present
-      [ -f "$SKILLS_SRC/PR_WORKFLOW.md" ] && cp "$SKILLS_SRC/PR_WORKFLOW.md" "$SKILLS_DST/" 2>/dev/null || true
-    fi
+    copy_skills() {
+      # Copy skill files into workspace (resolving symlinks from maintainers repo)
+      SKILLS_SRC="/Users/phaedrus/Projects/maintainers/.agents/skills"
+      SKILLS_DST=".agents/skills"
+      if [ -d "$SKILLS_SRC" ]; then
+        mkdir -p "$SKILLS_DST"
+        for skill in review-pr prepare-pr merge-pr pr-cluster; do
+          if [ -d "$SKILLS_SRC/$skill" ]; then
+            cp -RL "$SKILLS_SRC/$skill" "$SKILLS_DST/" 2>/dev/null || true
+          fi
+        done
+        # Copy PR_WORKFLOW.md if present
+        [ -f "$SKILLS_SRC/PR_WORKFLOW.md" ] && cp "$SKILLS_SRC/PR_WORKFLOW.md" "$SKILLS_DST/" 2>/dev/null || true
+      fi
+    }
     # Triage enrichment is lightweight -- just needs gh CLI + skills, no repo clone
     if [ "$SYMPHONY_ISSUE_STATE" = "Triage" ]; then
+      copy_skills
       echo "Triage enrichment -- skipping repo clone"
       exit 0
     fi
     if [ "$SYMPHONY_ISSUE_STATE" = "Closure" ]; then
+      copy_skills
       echo "Closure agent -- just needs gh CLI, no repo clone"
       exit 0
     fi
     if [ "$SYMPHONY_ISSUE_STATE" = "Request Changes" ]; then
+      copy_skills
       echo "Request Changes agent -- just needs gh CLI, no repo clone"
       exit 0
     fi
@@ -48,6 +52,7 @@ hooks:
     if [ -n "$PR_NUM" ]; then
       gh pr checkout "$PR_NUM" --force 2>/dev/null || git checkout main
     fi
+    copy_skills
   before_run: |
     # Triage, Closure, and Request Changes phases don't need repo operations
     if [ "$SYMPHONY_ISSUE_STATE" = "Triage" ] || [ "$SYMPHONY_ISSUE_STATE" = "Closure" ] || [ "$SYMPHONY_ISSUE_STATE" = "Request Changes" ]; then
@@ -58,7 +63,7 @@ hooks:
     PR_NUM=$(echo "$SYMPHONY_ISSUE_TITLE" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
     if [ -n "$PR_NUM" ]; then
       gh pr checkout "$PR_NUM" --force 2>/dev/null || true
-      git pull --rebase origin HEAD 2>/dev/null || true
+      git rebase origin/main 2>/dev/null || true
     fi
   timeout_ms: 120000
 
