@@ -42,6 +42,7 @@ hooks:
       exit 0
     fi
     git clone /Users/phaedrus/Projects/openclaw . 2>/dev/null || true
+    git remote set-url origin https://github.com/openclaw/openclaw.git
     # Extract PR number from issue title (format: "PR #1234: title" or "#1234")
     PR_NUM=$(echo "$SYMPHONY_ISSUE_TITLE" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
     if [ -n "$PR_NUM" ]; then
@@ -53,6 +54,7 @@ hooks:
       exit 0
     fi
     # Ensure we're on the right branch and up to date
+    git fetch origin 2>/dev/null || true
     PR_NUM=$(echo "$SYMPHONY_ISSUE_TITLE" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
     if [ -n "$PR_NUM" ]; then
       gh pr checkout "$PR_NUM" --force 2>/dev/null || true
