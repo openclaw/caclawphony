@@ -222,8 +222,7 @@ defmodule SymphonyElixir.CoreTest do
 
     File.write!(workflow_path, "---\ntracker:\n  kind: linear\n")
 
-    assert {:ok,
-            %{config: %{"tracker" => %{"kind" => "linear"}}, prompt: "", prompt_template: ""}} =
+    assert {:ok, %{config: %{"tracker" => %{"kind" => "linear"}}, prompt: "", prompt_template: ""}} =
              Workflow.load(workflow_path)
   end
 
@@ -993,9 +992,7 @@ defmodule SymphonyElixir.CoreTest do
     assert :ok =
              Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
 
-    Workflow.set_workflow_file_path(
-      Path.join(System.tmp_dir!(), "missing-workflow-#{System.unique_integer([:positive])}.md")
-    )
+    Workflow.set_workflow_file_path(Path.join(System.tmp_dir!(), "missing-workflow-#{System.unique_integer([:positive])}.md"))
 
     issue = %Issue{
       identifier: "MT-780",
