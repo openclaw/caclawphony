@@ -701,7 +701,7 @@ defmodule SymphonyElixir.Orchestrator do
       Process.cancel_timer(old_timer)
     end
 
-    timer_ref = Process.send_after(self(), {:retry_issue, issue_id}, delay_ms)
+    timer_ref = Process.send_after(self(), {:retry_issue, issue_id}, due_at_ms, abs: true)
 
     error_suffix = if is_binary(error), do: " error=#{error}", else: ""
 

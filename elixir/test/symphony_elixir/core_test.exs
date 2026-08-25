@@ -634,15 +634,16 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    before_send_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :normal})
-    Process.sleep(50)
     state = :sys.get_state(pid)
+    after_state_ms = System.monotonic_time(:millisecond)
 
     refute Map.has_key?(state.running, issue_id)
     assert MapSet.member?(state.completed, issue_id)
     assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
-    assert is_integer(due_at_ms)
-    assert_due_in_range(due_at_ms, 500, 1_100)
+    assert due_at_ms >= before_send_ms + 1_000
+    assert due_at_ms <= after_state_ms + 1_000
   end
 
   test "retry delays use configurable agent continuation and base settings" do
@@ -680,14 +681,16 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    before_continuation_send_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :normal})
-    Process.sleep(50)
     continuation_state = :sys.get_state(pid)
+    after_continuation_state_ms = System.monotonic_time(:millisecond)
 
     assert %{attempt: 1, due_at_ms: continuation_due_at_ms} =
              continuation_state.retry_attempts[issue_id]
 
-    assert_due_in_range(continuation_due_at_ms, 1_400, 2_200)
+    assert continuation_due_at_ms >= before_continuation_send_ms + 2_000
+    assert continuation_due_at_ms <= after_continuation_state_ms + 2_000
 
     :sys.replace_state(pid, fn state ->
       state
@@ -698,14 +701,16 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    before_failure_send_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :boom})
-    Process.sleep(50)
     failure_state = :sys.get_state(pid)
+    after_failure_state_ms = System.monotonic_time(:millisecond)
 
     assert %{attempt: 1, due_at_ms: failure_due_at_ms, error: "agent exited: :boom"} =
              failure_state.retry_attempts[issue_id]
 
-    assert_due_in_range(failure_due_at_ms, 19_000, 20_500)
+    assert failure_due_at_ms >= before_failure_send_ms + 20_000
+    assert failure_due_at_ms <= after_failure_state_ms + 20_000
   end
 
   test "abnormal worker exit increments retry attempt progressively" do
@@ -738,14 +743,16 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    before_send_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :boom})
-    Process.sleep(50)
     state = :sys.get_state(pid)
+    after_state_ms = System.monotonic_time(:millisecond)
 
     assert %{attempt: 3, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 39_500, 40_500)
+    assert due_at_ms >= before_send_ms + 40_000
+    assert due_at_ms <= after_state_ms + 40_000
   end
 
   test "first abnormal worker exit waits before retrying" do
@@ -777,21 +784,16 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    before_send_ms = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :boom})
-    Process.sleep(50)
     state = :sys.get_state(pid)
+    after_state_ms = System.monotonic_time(:millisecond)
 
     assert %{attempt: 1, due_at_ms: due_at_ms, identifier: "MT-560", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 9_000, 10_500)
-  end
-
-  defp assert_due_in_range(due_at_ms, min_remaining_ms, max_remaining_ms) do
-    remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
-
-    assert remaining_ms >= min_remaining_ms
-    assert remaining_ms <= max_remaining_ms
+    assert due_at_ms >= before_send_ms + 10_000
+    assert due_at_ms <= after_state_ms + 10_000
   end
 
   test "fetch issues by states with empty state set is a no-op" do
