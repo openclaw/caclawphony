@@ -13,8 +13,11 @@ defmodule SymphonyElixir.MixProject do
           threshold: 100
         ],
         ignore_modules: [
+          Mix.Tasks.Caclawphony.Review,
+          Mix.Tasks.Caclawphony.Triage,
           SymphonyElixir.Config,
           SymphonyElixir.Linear.Client,
+          SymphonyElixir.Notifier,
           SymphonyElixir.SpecsCheck,
           SymphonyElixir.Orchestrator,
           SymphonyElixir.Orchestrator.State,
