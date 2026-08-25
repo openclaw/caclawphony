@@ -722,8 +722,6 @@ defmodule SymphonyElixir.Config do
     end)
   end
 
-  defp extract_gates_options(_section), do: %{}
-
   defp extract_gate_options(gate_options) when is_map(gate_options) do
     gate_options = normalize_keys(gate_options)
 
@@ -749,8 +747,6 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  defp extract_labels_options(_section), do: %{}
-
   defp extract_states_options(section) when is_map(section) do
     section
     |> normalize_keys()
@@ -766,8 +762,6 @@ defmodule SymphonyElixir.Config do
       _ -> %{}
     end
   end
-
-  defp extract_states_options(_section), do: %{}
 
   defp extract_notification_telegram_options(section) do
     %{}

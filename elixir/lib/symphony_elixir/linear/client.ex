@@ -158,7 +158,7 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
-  @spec graphql(String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec graphql(String.t(), map(), keyword()) :: {:ok, term()} | {:error, term()}
   def graphql(query, variables \\ %{}, opts \\ [])
       when is_binary(query) and is_map(variables) and is_list(opts) do
     payload = build_graphql_payload(query, variables, Keyword.get(opts, :operation_name))
