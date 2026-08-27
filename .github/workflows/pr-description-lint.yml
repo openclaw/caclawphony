@@ -4,6 +4,9 @@ on:
   pull_request:
     types: [opened, edited, reopened, synchronize, ready_for_review]
 
+permissions:
+  contents: read
+
 jobs:
   validate-pr-description:
     runs-on: ubuntu-latest
