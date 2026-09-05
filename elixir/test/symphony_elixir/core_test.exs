@@ -13,6 +13,8 @@ defmodule SymphonyElixir.CoreTest do
 
     assert Config.poll_interval_ms() == 30_000
     assert Config.linear_active_states() == ["Todo", "In Progress"]
+    assert Config.linear_max_state_list_pages() == 20
+    assert Config.linear_max_state_list_issues() == 1000
 
     assert Config.linear_terminal_states() == [
              "Closed",
@@ -222,8 +224,7 @@ defmodule SymphonyElixir.CoreTest do
 
     File.write!(workflow_path, "---\ntracker:\n  kind: linear\n")
 
-    assert {:ok,
-            %{config: %{"tracker" => %{"kind" => "linear"}}, prompt: "", prompt_template: ""}} =
+    assert {:ok, %{config: %{"tracker" => %{"kind" => "linear"}}, prompt: "", prompt_template: ""}} =
              Workflow.load(workflow_path)
   end
 
@@ -993,9 +994,7 @@ defmodule SymphonyElixir.CoreTest do
     assert :ok =
              Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
 
-    Workflow.set_workflow_file_path(
-      Path.join(System.tmp_dir!(), "missing-workflow-#{System.unique_integer([:positive])}.md")
-    )
+    Workflow.set_workflow_file_path(Path.join(System.tmp_dir!(), "missing-workflow-#{System.unique_integer([:positive])}.md"))
 
     issue = %Issue{
       identifier: "MT-780",

@@ -120,6 +120,10 @@ Notes:
   `externalSandbox`, `workspaceWrite`.
 - `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- `tracker.max_state_list_pages` caps how many Linear pages Symphony follows when listing issues by
+  state. Default: `20`. The fetch fails if Linear still reports a next page after that.
+- `tracker.max_state_list_issues` caps how many issues that listing may accumulate. Default: `1000`.
+  The fetch fails if a page would push the total over the cap.
 - If the Markdown body is blank, Symphony uses a default prompt template that includes the issue
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run

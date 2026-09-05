@@ -99,6 +99,8 @@ defmodule SymphonyElixir.TestSupport do
           tracker_assignee: nil,
           tracker_active_states: ["Todo", "In Progress"],
           tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
+          tracker_max_state_list_pages: nil,
+          tracker_max_state_list_issues: nil,
           poll_interval_ms: 30_000,
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
           max_concurrent_agents: 10,
@@ -143,6 +145,8 @@ defmodule SymphonyElixir.TestSupport do
     tracker_assignee = Keyword.get(config, :tracker_assignee)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
+    tracker_max_state_list_pages = Keyword.get(config, :tracker_max_state_list_pages)
+    tracker_max_state_list_issues = Keyword.get(config, :tracker_max_state_list_issues)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
     workspace_root = Keyword.get(config, :workspace_root)
     max_concurrent_agents = Keyword.get(config, :max_concurrent_agents)
@@ -188,6 +192,10 @@ defmodule SymphonyElixir.TestSupport do
         "  assignee: #{yaml_value(tracker_assignee)}",
         "  active_states: #{yaml_value(tracker_active_states)}",
         "  terminal_states: #{yaml_value(tracker_terminal_states)}",
+        tracker_max_state_list_pages &&
+          "  max_state_list_pages: #{yaml_value(tracker_max_state_list_pages)}",
+        tracker_max_state_list_issues &&
+          "  max_state_list_issues: #{yaml_value(tracker_max_state_list_issues)}",
         "polling:",
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
         "workspace:",
