@@ -24,7 +24,8 @@ defmodule SymphonyElixir.HttpServer do
         orchestrator = Keyword.get(opts, :orchestrator, Orchestrator)
         snapshot_timeout_ms = Keyword.get(opts, :snapshot_timeout_ms, 15_000)
 
-        with {:ok, ip} <- parse_host(host) do
+        with {:ok, ip} <- parse_host(host),
+             :ok <- ensure_bind_allowed(ip, host, opts) do
           endpoint_opts = [
             server: true,
             http: [ip: ip, port: port],
@@ -59,6 +60,35 @@ defmodule SymphonyElixir.HttpServer do
   catch
     :exit, _reason -> nil
   end
+
+  defp ensure_bind_allowed(ip, host, opts) do
+    if loopback_bind?(host, ip) or allow_non_loopback?(opts) do
+      :ok
+    else
+      {:error, {:non_loopback_bind, normalize_host(host)}}
+    end
+  end
+
+  defp allow_non_loopback?(opts) do
+    Keyword.get(opts, :allow_non_loopback, Config.server_allow_non_loopback?())
+  end
+
+  defp loopback_bind?(host, ip), do: loopback_name?(host) or loopback_ip?(ip)
+
+  defp loopback_name?(host) when is_binary(host) do
+    host
+    |> String.trim()
+    |> String.downcase()
+    |> Kernel.in(["localhost", "127.0.0.1", "::1", "[::1]"])
+  end
+
+  defp loopback_name?(_host), do: false
+
+  # 127.0.0.0/8 and ::1. IPv4-mapped ::ffff:127.x.x.x is also loopback.
+  defp loopback_ip?({127, _, _, _}), do: true
+  defp loopback_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  defp loopback_ip?({0, 0, 0, 0, 0, 65_535, hi, _lo}) when hi >= 0x7F00 and hi <= 0x7FFF, do: true
+  defp loopback_ip?(_ip), do: false
 
   defp parse_host({_, _, _, _} = ip), do: {:ok, ip}
   defp parse_host({_, _, _, _, _, _, _, _} = ip), do: {:ok, ip}

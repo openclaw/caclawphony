@@ -83,6 +83,7 @@ defmodule SymphonyElixir.Config do
   @default_observability_refresh_ms 1_000
   @default_observability_render_interval_ms 16
   @default_server_host "127.0.0.1"
+  @default_server_allow_non_loopback false
   @workflow_options_schema NimbleOptions.new!(
                              tracker: [
                                type: :map,
@@ -200,7 +201,11 @@ defmodule SymphonyElixir.Config do
                                default: %{},
                                keys: [
                                  port: [type: {:or, [:non_neg_integer, nil]}, default: nil],
-                                 host: [type: :string, default: @default_server_host]
+                                 host: [type: :string, default: @default_server_host],
+                                 allow_non_loopback: [
+                                   type: :boolean,
+                                   default: @default_server_allow_non_loopback
+                                 ]
                                ]
                              ],
                              notifications: [
@@ -544,6 +549,14 @@ defmodule SymphonyElixir.Config do
     get_in(validated_workflow_options(), [:server, :host])
   end
 
+  @spec server_allow_non_loopback?() :: boolean()
+  def server_allow_non_loopback? do
+    case env_override_bool("SYMPHONY_ALLOW_NON_LOOPBACK") do
+      nil -> get_in(validated_workflow_options(), [:server, :allow_non_loopback])
+      value -> value
+    end
+  end
+
   @spec validate!() :: :ok | {:error, term()}
   def validate! do
     with {:ok, _workflow} <- current_workflow(),
@@ -708,6 +721,7 @@ defmodule SymphonyElixir.Config do
     %{}
     |> put_if_present(:port, non_negative_integer_value(Map.get(section, "port")))
     |> put_if_present(:host, scalar_string_value(Map.get(section, "host")))
+    |> put_if_present(:allow_non_loopback, boolean_value(Map.get(section, "allow_non_loopback")))
   end
 
   defp extract_notifications_options(section) do
@@ -901,6 +915,20 @@ defmodule SymphonyElixir.Config do
     case parse_non_negative_integer(value) do
       {:ok, parsed} -> parsed
       :error -> :omit
+    end
+  end
+
+  defp env_override_bool(name) do
+    case System.get_env(name) do
+      nil ->
+        nil
+
+      value ->
+        case String.downcase(String.trim(value)) do
+          flag when flag in ["1", "true", "yes", "on"] -> true
+          flag when flag in ["0", "false", "no", "off", ""] -> false
+          _ -> nil
+        end
     end
   end
 
