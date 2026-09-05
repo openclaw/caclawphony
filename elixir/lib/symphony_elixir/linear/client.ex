@@ -55,8 +55,8 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   @query_by_ids """
-  query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!) {
-    issues(filter: {id: {in: $ids}}, first: $first) {
+  query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+    issues(filter: {id: {in: $ids}}, first: $first, after: $after) {
       nodes {
         id
         identifier
@@ -90,6 +90,10 @@ defmodule SymphonyElixir.Linear.Client do
         }
         createdAt
         updatedAt
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
       }
     }
   }
@@ -218,6 +222,22 @@ defmodule SymphonyElixir.Linear.Client do
     |> finalize_paginated_issues()
   end
 
+  @doc false
+  @spec fetch_issue_states_by_ids_for_test([String.t()], (map(), list() -> term())) ::
+          {:ok, [Issue.t()]} | {:error, term()}
+  def fetch_issue_states_by_ids_for_test(issue_ids, request_fun)
+      when is_list(issue_ids) and is_function(request_fun, 2) do
+    ids = Enum.uniq(issue_ids)
+
+    case ids do
+      [] ->
+        {:ok, []}
+
+      ids ->
+        do_fetch_issue_states(ids, nil, request_fun: request_fun)
+    end
+  end
+
   defp do_fetch_by_states(project_slug, state_names, assignee_filter) do
     do_fetch_by_states_page(project_slug, state_names, assignee_filter, nil, [])
   end
@@ -253,18 +273,53 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp finalize_paginated_issues(acc_issues) when is_list(acc_issues), do: Enum.reverse(acc_issues)
 
-  defp do_fetch_issue_states(ids, assignee_filter) do
-    case graphql(@query_by_ids, %{
-           ids: ids,
-           first: Enum.min([length(ids), @issue_page_size]),
-           relationFirst: @issue_page_size
-         }) do
-      {:ok, body} ->
-        decode_linear_response(body, assignee_filter)
+  defp do_fetch_issue_states(ids, assignee_filter, opts \\ []) do
+    do_fetch_issue_states_page(ids, assignee_filter, nil, [], opts)
+  end
+
+  defp do_fetch_issue_states_page(ids, assignee_filter, after_cursor, acc_issues, opts) do
+    with {:ok, body} <-
+           graphql(
+             @query_by_ids,
+             %{
+               ids: ids,
+               first: Enum.min([length(ids), @issue_page_size]),
+               relationFirst: @issue_page_size,
+               after: after_cursor
+             },
+             opts
+           ),
+         {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter) do
+      issues
+      |> prepend_page_issues(acc_issues)
+      |> continue_issue_states_page(ids, assignee_filter, page_info, opts)
+    end
+  end
+
+  defp continue_issue_states_page(acc_issues, ids, assignee_filter, page_info, opts) do
+    if collected_requested_issue_ids?(acc_issues, ids) do
+      {:ok, finalize_paginated_issues(acc_issues)}
+    else
+      follow_issue_states_page(acc_issues, ids, assignee_filter, page_info, opts)
+    end
+  end
+
+  defp follow_issue_states_page(acc_issues, ids, assignee_filter, page_info, opts) do
+    case next_page_cursor(page_info) do
+      {:ok, next_cursor} ->
+        do_fetch_issue_states_page(ids, assignee_filter, next_cursor, acc_issues, opts)
+
+      :done ->
+        {:ok, finalize_paginated_issues(acc_issues)}
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp collected_requested_issue_ids?(issues, ids) when is_list(issues) and is_list(ids) do
+    collected_ids = MapSet.new(issues, & &1.id)
+    MapSet.subset?(MapSet.new(ids), collected_ids)
   end
 
   defp build_graphql_payload(query, variables, operation_name) do

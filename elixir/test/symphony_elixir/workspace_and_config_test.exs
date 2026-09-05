@@ -348,6 +348,121 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Enum.map(merged, & &1.identifier) == ["MT-1", "MT-2", "MT-3"]
   end
 
+  test "linear by-id refresh follows pageInfo until later IDs are returned" do
+    ids = Enum.map(1..55, &"issue-#{&1}")
+    requests = :ets.new(:linear_by_id_requests, [:public])
+
+    request_fun = fn payload, _headers ->
+      variables = payload["variables"]
+      first = Map.get(variables, :first) || Map.get(variables, "first")
+      after_cursor = Map.get(variables, :after) || Map.get(variables, "after")
+      requested_ids = Map.get(variables, :ids) || Map.get(variables, "ids")
+
+      assert first <= 50
+      assert requested_ids == ids
+      :ets.insert(requests, {System.unique_integer([:monotonic]), after_cursor})
+
+      {nodes, page_info} =
+        case after_cursor do
+          nil ->
+            {Enum.map(1..50, &by_id_issue_node/1), %{"hasNextPage" => true, "endCursor" => "cursor-page-2"}}
+
+          "cursor-page-2" ->
+            {Enum.map(51..55, &by_id_issue_node/1), %{"hasNextPage" => false, "endCursor" => "cursor-done"}}
+        end
+
+      {:ok,
+       %{
+         status: 200,
+         body: %{
+           "data" => %{
+             "issues" => %{
+               "nodes" => nodes,
+               "pageInfo" => page_info
+             }
+           }
+         }
+       }}
+    end
+
+    assert {:ok, issues} = Client.fetch_issue_states_by_ids_for_test(ids, request_fun)
+    returned_ids = Enum.map(issues, & &1.id)
+
+    assert returned_ids == ids
+    assert "issue-51" in returned_ids
+    assert "issue-55" in returned_ids
+    assert :ets.info(requests, :size) == 2
+  end
+
+  test "linear by-id refresh stops once every requested id is collected" do
+    ids = Enum.map(1..51, &"issue-#{&1}")
+    requests = :ets.new(:linear_by_id_early_stop, [:public])
+
+    request_fun = fn payload, _headers ->
+      variables = payload["variables"]
+      first = Map.get(variables, :first) || Map.get(variables, "first")
+      after_cursor = Map.get(variables, :after) || Map.get(variables, "after")
+
+      assert first <= 50
+      :ets.insert(requests, {System.unique_integer([:monotonic]), after_cursor})
+
+      {nodes, page_info} =
+        case after_cursor do
+          nil ->
+            {Enum.map(1..50, &by_id_issue_node/1), %{"hasNextPage" => true, "endCursor" => "cursor-page-2"}}
+
+          "cursor-page-2" ->
+            {Enum.map(51..60, &by_id_issue_node/1), %{"hasNextPage" => true, "endCursor" => "cursor-page-3"}}
+
+          "cursor-page-3" ->
+            flunk("by-id refresh continued after every requested id was already returned")
+        end
+
+      {:ok,
+       %{
+         status: 200,
+         body: %{
+           "data" => %{
+             "issues" => %{
+               "nodes" => nodes,
+               "pageInfo" => page_info
+             }
+           }
+         }
+       }}
+    end
+
+    assert {:ok, issues} = Client.fetch_issue_states_by_ids_for_test(ids, request_fun)
+    assert Enum.map(issues, & &1.id) == ids ++ Enum.map(52..60, &"issue-#{&1}")
+    assert :ets.info(requests, :size) == 2
+  end
+
+  test "linear by-id refresh keeps first at most 50 even for larger id lists" do
+    ids = Enum.map(1..60, &"issue-#{&1}")
+
+    request_fun = fn payload, _headers ->
+      variables = payload["variables"]
+      first = Map.get(variables, :first) || Map.get(variables, "first")
+      assert first == 50
+
+      {:ok,
+       %{
+         status: 200,
+         body: %{
+           "data" => %{
+             "issues" => %{
+               "nodes" => Enum.map(1..50, &by_id_issue_node/1),
+               "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+             }
+           }
+         }
+       }}
+    end
+
+    assert {:ok, issues} = Client.fetch_issue_states_by_ids_for_test(ids, request_fun)
+    assert length(issues) == 50
+  end
+
   test "linear client logs response bodies for non-200 graphql responses" do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -971,5 +1086,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
     assert Config.workflow_prompt() == workflow_prompt
+  end
+
+  defp by_id_issue_node(index) when is_integer(index) do
+    %{
+      "id" => "issue-#{index}",
+      "identifier" => "MT-#{index}",
+      "title" => "Issue #{index}",
+      "state" => %{"name" => "In Progress"}
+    }
   end
 end
