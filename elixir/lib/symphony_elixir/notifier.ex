@@ -65,11 +65,7 @@ defmodule SymphonyElixir.Notifier do
   end
 
   defp render_template(template, issue_context) do
-    template =
-      case String.trim(template) do
-        "" -> Config.notification_template()
-        configured -> configured
-      end
+    template = String.trim(template)
 
     try do
       template
