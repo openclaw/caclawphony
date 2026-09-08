@@ -493,15 +493,9 @@ defmodule SymphonyElixir.Config do
 
     case configured_gate_states do
       [] ->
-        gates()
-        |> Enum.reduce([], fn {gate_name, gate_options}, acc ->
-          if gate_options["notify"] == true do
-            [gate_name_to_state(gate_name) | acc]
-          else
-            acc
-          end
-        end)
-        |> Enum.reverse()
+        for {gate_name, %{"notify" => true}} <- gates() do
+          gate_name_to_state(gate_name)
+        end
 
       states ->
         states
@@ -728,8 +722,6 @@ defmodule SymphonyElixir.Config do
     end)
   end
 
-  defp extract_gates_options(_section), do: %{}
-
   defp extract_gate_options(gate_options) when is_map(gate_options) do
     gate_options = normalize_keys(gate_options)
 
@@ -755,8 +747,6 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  defp extract_labels_options(_section), do: %{}
-
   defp extract_states_options(section) when is_map(section) do
     section
     |> normalize_keys()
@@ -772,8 +762,6 @@ defmodule SymphonyElixir.Config do
       _ -> %{}
     end
   end
-
-  defp extract_states_options(_section), do: %{}
 
   defp extract_notification_telegram_options(section) do
     %{}
@@ -1082,8 +1070,7 @@ defmodule SymphonyElixir.Config do
     gate_name
     |> String.trim()
     |> String.split("_", trim: true)
-    |> Enum.map(&String.capitalize/1)
-    |> Enum.join(" ")
+    |> Enum.map_join(" ", &String.capitalize/1)
   end
 
   defp gate_name_to_state(_gate_name), do: nil

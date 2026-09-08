@@ -1,1 +1,1 @@
-/Users/phaedrus/Projects/caclawphony/WORKFLOW.md
+../WORKFLOW.md

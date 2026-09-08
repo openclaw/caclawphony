@@ -87,9 +87,7 @@ defmodule Mix.Tasks.Caclawphony.Triage do
               priority: priority
             })
 
-          Mix.shell().info(
-            "Queued #{issue["identifier"]} for triage: PR ##{pr_number} (#{issue["url"]})"
-          )
+          Mix.shell().info("Queued #{issue["identifier"]} for triage: PR ##{pr_number} (#{issue["url"]})")
         end)
     end
   end
@@ -120,9 +118,7 @@ defmodule Mix.Tasks.Caclawphony.Triage do
         end
 
       {output, status} ->
-        Mix.raise(
-          "Failed to read PR ##{pr_number} #{field} via gh (exit #{status}): #{String.trim(output)}"
-        )
+        Mix.raise("Failed to read PR ##{pr_number} #{field} via gh (exit #{status}): #{String.trim(output)}")
     end
   end
 
