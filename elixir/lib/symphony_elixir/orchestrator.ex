@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, Notifier, StatusDashboard, Tracker}
+  alias SymphonyElixir.{AgentRunner, Config, Notifier, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   # Slightly above the dashboard render interval so "checking now…" can render.
@@ -781,9 +781,11 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp cleanup_issue_workspace(identifier) when is_binary(identifier) do
-    workspace = Config.workspace_root() <> "/" <> identifier
+    workspace =
+      Path.join(Config.workspace_root(), String.replace(identifier, ~r/[^a-zA-Z0-9._-]/, "_"))
+
     Logger.info("Cleaning up terminal issue workspace: issue_identifier=#{identifier} workspace=#{workspace}")
-    File.rm_rf(workspace)
+    Workspace.remove_issue_workspaces(identifier)
     :ok
   end
 
