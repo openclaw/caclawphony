@@ -1166,6 +1166,7 @@ Linear-specific requirements for `tracker.kind == "linear"`:
 - Candidate issue query filters project using `project: { slugId: { eq: $projectSlug } }`
 - Issue-state refresh query uses GraphQL issue IDs with variable type `[ID!]`
 - Pagination required for candidate issues
+- Issue-state refresh by id paginates (`first` at most `50`) until every requested id is returned or Linear has no next page
 - Page size default: `50`
 - Network timeout: `30000 ms`
 
