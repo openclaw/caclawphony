@@ -13,6 +13,8 @@ defmodule SymphonyElixir.CoreTest do
 
     assert Config.poll_interval_ms() == 30_000
     assert Config.linear_active_states() == ["Todo", "In Progress"]
+    assert Config.linear_max_state_list_pages() == 20
+    assert Config.linear_max_state_list_issues() == 1000
 
     assert Config.linear_terminal_states() == [
              "Closed",

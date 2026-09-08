@@ -355,6 +355,14 @@ Fields:
   - Default: `Todo`, `In Progress`
 - `terminal_states` (list of strings or comma-separated string)
   - Default: `Closed`, `Cancelled`, `Canceled`, `Duplicate`, `Done`
+- `max_state_list_pages` (positive integer)
+  - Maximum Linear GraphQL pages followed when listing issues by state.
+  - Default: `20`
+  - Exceeding the cap fails the fetch instead of continuing to page.
+- `max_state_list_issues` (positive integer)
+  - Maximum issues accumulated across those pages.
+  - Default: `1000`
+  - Exceeding the cap fails the fetch instead of keeping a truncated list.
 
 #### 5.3.2 `polling` (object)
 
@@ -557,6 +565,8 @@ This section is intentionally redundant so a coding agent can implement the conf
 - `tracker.project_slug`: string, required when `tracker.kind=linear`
 - `tracker.active_states`: list/string, default `Todo, In Progress`
 - `tracker.terminal_states`: list/string, default `Closed, Cancelled, Canceled, Duplicate, Done`
+- `tracker.max_state_list_pages`: positive integer, default `20`
+- `tracker.max_state_list_issues`: positive integer, default `1000`
 - `polling.interval_ms`: integer, default `30000`
 - `workspace.root`: path, default `<system-temp>/symphony_workspaces`
 - `hooks.after_create`: shell script or null
@@ -1200,6 +1210,8 @@ Recommended error categories:
 - `linear_graphql_errors`
 - `linear_unknown_payload`
 - `linear_missing_end_cursor` (pagination integrity error)
+- `linear_state_list_page_limit` (state-list pagination exceeded `tracker.max_state_list_pages`)
+- `linear_state_list_issue_limit` (state-list pagination exceeded `tracker.max_state_list_issues`)
 
 Orchestrator behavior on tracker errors:
 

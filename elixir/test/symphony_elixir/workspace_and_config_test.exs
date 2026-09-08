@@ -348,6 +348,88 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Enum.map(merged, & &1.identifier) == ["MT-1", "MT-2", "MT-3"]
   end
 
+  @tag timeout: 2_000
+  test "state-list pagination errors when Linear never ends the page stream" do
+    requests = :ets.new(:linear_state_list_unbounded, [:public])
+
+    request_fun = fn _payload, _headers ->
+      :ets.insert(requests, {System.unique_integer([:monotonic]), :page})
+
+      {:ok,
+       %{
+         status: 200,
+         body: state_list_page_body([state_list_issue_node(1)], true, "cursor-stuck")
+       }}
+    end
+
+    assert {:error, {:linear_state_list_page_limit, max_pages}} =
+             Client.fetch_issues_by_states_for_test(["Todo"], request_fun)
+
+    assert max_pages == Config.linear_max_state_list_pages()
+    assert max_pages == 20
+    assert :ets.info(requests, :size) == max_pages
+  end
+
+  test "state-list pagination honors a configured page cap" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_max_state_list_pages: 2)
+    requests = :ets.new(:linear_state_list_page_cap, [:public])
+
+    request_fun = fn _payload, _headers ->
+      :ets.insert(requests, {System.unique_integer([:monotonic]), :page})
+
+      {:ok,
+       %{
+         status: 200,
+         body: state_list_page_body([state_list_issue_node(1)], true, "cursor-stuck")
+       }}
+    end
+
+    assert {:error, {:linear_state_list_page_limit, 2}} =
+             Client.fetch_issues_by_states_for_test(["Todo"], request_fun)
+
+    assert :ets.info(requests, :size) == 2
+  end
+
+  test "state-list pagination errors when accumulated issues exceed the cap" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_max_state_list_issues: 2)
+
+    request_fun = fn _payload, _headers ->
+      {:ok,
+       %{
+         status: 200,
+         body:
+           state_list_page_body(
+             [state_list_issue_node(1), state_list_issue_node(2), state_list_issue_node(3)],
+             false,
+             nil
+           )
+       }}
+    end
+
+    assert {:error, {:linear_state_list_issue_limit, 2}} =
+             Client.fetch_issues_by_states_for_test(["Todo"], request_fun)
+  end
+
+  test "state-list pagination returns issues when Linear ends before the cap" do
+    request_fun = fn payload, _headers ->
+      after_cursor = get_in(payload, ["variables", :after]) || get_in(payload, ["variables", "after"])
+
+      {nodes, page_info_has_next, cursor} =
+        case after_cursor do
+          nil ->
+            {[state_list_issue_node(1), state_list_issue_node(2)], true, "cursor-2"}
+
+          "cursor-2" ->
+            {[state_list_issue_node(3)], false, nil}
+        end
+
+      {:ok, %{status: 200, body: state_list_page_body(nodes, page_info_has_next, cursor)}}
+    end
+
+    assert {:ok, issues} = Client.fetch_issues_by_states_for_test(["Todo"], request_fun)
+    assert Enum.map(issues, & &1.identifier) == ["MT-1", "MT-2", "MT-3"]
+  end
+
   test "linear client logs response bodies for non-200 graphql responses" do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -726,6 +808,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_active_states: %{todo: true},
       tracker_terminal_states: %{done: true},
+      tracker_max_state_list_pages: 0,
+      tracker_max_state_list_issues: "bad",
       poll_interval_ms: %{bad: true},
       workspace_root: 123,
       max_retry_backoff_ms: 0,
@@ -740,6 +824,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert Config.linear_active_states() == ["Todo", "In Progress"]
     assert Config.linear_terminal_states() == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    assert Config.linear_max_state_list_pages() == 20
+    assert Config.linear_max_state_list_issues() == 1000
     assert Config.poll_interval_ms() == 30_000
     assert Config.workspace_root() == Path.join(System.tmp_dir!(), "symphony_workspaces")
     assert Config.max_retry_backoff_ms() == 300_000
@@ -971,5 +1057,25 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
     assert Config.workflow_prompt() == workflow_prompt
+  end
+
+  defp state_list_issue_node(index) when is_integer(index) do
+    %{
+      "id" => "issue-#{index}",
+      "identifier" => "MT-#{index}",
+      "title" => "Issue #{index}",
+      "state" => %{"name" => "Todo"}
+    }
+  end
+
+  defp state_list_page_body(nodes, has_next_page, end_cursor) do
+    %{
+      "data" => %{
+        "issues" => %{
+          "nodes" => nodes,
+          "pageInfo" => %{"hasNextPage" => has_next_page, "endCursor" => end_cursor}
+        }
+      }
+    }
   end
 end

@@ -218,32 +218,139 @@ defmodule SymphonyElixir.Linear.Client do
     |> finalize_paginated_issues()
   end
 
-  defp do_fetch_by_states(project_slug, state_names, assignee_filter) do
-    do_fetch_by_states_page(project_slug, state_names, assignee_filter, nil, [])
+  @doc false
+  @spec fetch_issues_by_states_for_test([String.t()], (map(), list() -> term())) ::
+          {:ok, [Issue.t()]} | {:error, term()}
+  def fetch_issues_by_states_for_test(state_names, request_fun)
+      when is_list(state_names) and is_function(request_fun, 2) do
+    normalized_states = Enum.map(state_names, &to_string/1) |> Enum.uniq()
+
+    if normalized_states == [] do
+      {:ok, []}
+    else
+      project_slug = Config.linear_project_slug()
+
+      cond do
+        is_nil(Config.linear_api_token()) ->
+          {:error, :missing_linear_api_token}
+
+        is_nil(project_slug) ->
+          {:error, :missing_linear_project_slug}
+
+        true ->
+          do_fetch_by_states(project_slug, normalized_states, nil, request_fun: request_fun)
+      end
+    end
   end
 
-  defp do_fetch_by_states_page(project_slug, state_names, assignee_filter, after_cursor, acc_issues) do
+  defp do_fetch_by_states(project_slug, state_names, assignee_filter, opts \\ []) do
+    do_fetch_by_states_page(project_slug, state_names, assignee_filter, nil, [], 0, opts)
+  end
+
+  defp do_fetch_by_states_page(
+         project_slug,
+         state_names,
+         assignee_filter,
+         after_cursor,
+         acc_issues,
+         page_count,
+         opts
+       ) do
+    max_pages = Config.linear_max_state_list_pages()
+    max_issues = Config.linear_max_state_list_issues()
+
+    cond do
+      page_count >= max_pages ->
+        {:error, {:linear_state_list_page_limit, max_pages}}
+
+      length(acc_issues) > max_issues ->
+        {:error, {:linear_state_list_issue_limit, max_issues}}
+
+      true ->
+        fetch_next_state_list_page(
+          project_slug,
+          state_names,
+          assignee_filter,
+          after_cursor,
+          acc_issues,
+          page_count,
+          max_issues,
+          opts
+        )
+    end
+  end
+
+  defp fetch_next_state_list_page(
+         project_slug,
+         state_names,
+         assignee_filter,
+         after_cursor,
+         acc_issues,
+         page_count,
+         max_issues,
+         opts
+       ) do
     with {:ok, body} <-
-           graphql(@query, %{
-             projectSlug: project_slug,
-             stateNames: state_names,
-             first: @issue_page_size,
-             relationFirst: @issue_page_size,
-             after: after_cursor
-           }),
-         {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter) do
-      updated_acc = prepend_page_issues(issues, acc_issues)
+           graphql(
+             @query,
+             %{
+               projectSlug: project_slug,
+               stateNames: state_names,
+               first: @issue_page_size,
+               relationFirst: @issue_page_size,
+               after: after_cursor
+             },
+             Keyword.take(opts, [:request_fun])
+           ),
+         {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter),
+         updated_acc = prepend_page_issues(issues, acc_issues),
+         :ok <- enforce_state_list_issue_limit(updated_acc, max_issues) do
+      continue_state_list_pagination(
+        project_slug,
+        state_names,
+        assignee_filter,
+        page_info,
+        updated_acc,
+        page_count,
+        opts
+      )
+    end
+  end
 
-      case next_page_cursor(page_info) do
-        {:ok, next_cursor} ->
-          do_fetch_by_states_page(project_slug, state_names, assignee_filter, next_cursor, updated_acc)
+  defp enforce_state_list_issue_limit(acc_issues, max_issues) do
+    if length(acc_issues) > max_issues do
+      {:error, {:linear_state_list_issue_limit, max_issues}}
+    else
+      :ok
+    end
+  end
 
-        :done ->
-          {:ok, finalize_paginated_issues(updated_acc)}
+  defp continue_state_list_pagination(
+         project_slug,
+         state_names,
+         assignee_filter,
+         page_info,
+         acc_issues,
+         page_count,
+         opts
+       ) do
+    case next_page_cursor(page_info) do
+      {:ok, next_cursor} ->
+        do_fetch_by_states_page(
+          project_slug,
+          state_names,
+          assignee_filter,
+          next_cursor,
+          acc_issues,
+          page_count + 1,
+          opts
+        )
 
-        {:error, reason} ->
-          {:error, reason}
-      end
+      :done ->
+        {:ok, finalize_paginated_issues(acc_issues)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

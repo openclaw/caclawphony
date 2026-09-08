@@ -8,6 +8,8 @@ defmodule SymphonyElixir.Config do
 
   @default_active_states ["Todo", "In Progress"]
   @default_terminal_states ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+  @default_max_state_list_pages 20
+  @default_max_state_list_issues 1000
   @default_linear_endpoint "https://api.linear.app/graphql"
   @default_prompt_template """
   You are working on a Linear issue.
@@ -100,6 +102,14 @@ defmodule SymphonyElixir.Config do
                                  terminal_states: [
                                    type: {:list, :string},
                                    default: @default_terminal_states
+                                 ],
+                                 max_state_list_pages: [
+                                   type: :pos_integer,
+                                   default: @default_max_state_list_pages
+                                 ],
+                                 max_state_list_issues: [
+                                   type: :pos_integer,
+                                   default: @default_max_state_list_issues
                                  ]
                                ]
                              ],
@@ -295,6 +305,16 @@ defmodule SymphonyElixir.Config do
   @spec linear_terminal_states() :: [String.t()]
   def linear_terminal_states do
     get_in(validated_workflow_options(), [:tracker, :terminal_states])
+  end
+
+  @spec linear_max_state_list_pages() :: pos_integer()
+  def linear_max_state_list_pages do
+    get_in(validated_workflow_options(), [:tracker, :max_state_list_pages])
+  end
+
+  @spec linear_max_state_list_issues() :: pos_integer()
+  def linear_max_state_list_issues do
+    get_in(validated_workflow_options(), [:tracker, :max_state_list_issues])
   end
 
   @spec poll_interval_ms() :: pos_integer()
@@ -646,6 +666,14 @@ defmodule SymphonyElixir.Config do
     |> put_if_present(:project_slug, scalar_string_value(Map.get(section, "project_slug")))
     |> put_if_present(:active_states, csv_value(Map.get(section, "active_states")))
     |> put_if_present(:terminal_states, csv_value(Map.get(section, "terminal_states")))
+    |> put_if_present(
+      :max_state_list_pages,
+      positive_integer_value(Map.get(section, "max_state_list_pages"))
+    )
+    |> put_if_present(
+      :max_state_list_issues,
+      positive_integer_value(Map.get(section, "max_state_list_issues"))
+    )
   end
 
   defp extract_polling_options(section) do
