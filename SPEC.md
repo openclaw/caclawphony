@@ -1373,6 +1373,8 @@ Enablement (extension):
   ephemeral port for local development and tests.
 - Implementations should bind loopback by default (`127.0.0.1` or host equivalent) unless explicitly
   configured otherwise.
+- Non-loopback binds (`0.0.0.0`, `::`, or a public address) must be refused unless the operator
+  sets an explicit opt-in (for example `server.allow_non_loopback`).
 - Changes to HTTP listener settings (for example `server.port`) do not need to hot-rebind;
   restart-required behavior is conformant.
 

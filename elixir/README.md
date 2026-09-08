@@ -147,6 +147,11 @@ codex:
 - If `WORKFLOW.md` is missing or has invalid YAML, startup and scheduling are halted until fixed.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
   `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
+  Those endpoints have no application authentication. The server trusts the bind address: it
+  listens on loopback (`127.0.0.1`, `::1`, or `localhost`) by default and refuses non-loopback
+  binds (`0.0.0.0`, `::`, or a public address). To bind a non-loopback interface, set
+  `server.allow_non_loopback: true` in `WORKFLOW.md` or `SYMPHONY_ALLOW_NON_LOOPBACK=1`, and put
+  a reverse-proxy auth layer in front of the dashboard.
 
 ## Web dashboard
 
