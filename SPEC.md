@@ -1059,14 +1059,14 @@ Optional client-side tool extension:
 
 `linear_graphql` extension contract:
 
-- Purpose: execute a raw GraphQL query or mutation against Linear using Symphony's configured
-  tracker auth for the current session.
+- Purpose: execute a raw GraphQL query against Linear using Symphony's configured
+  tracker auth for the current session. Mutation and subscription documents are refused.
 - Availability: only meaningful when `tracker.kind == "linear"` and valid Linear auth is configured.
 - Preferred input shape:
 
   ```json
   {
-    "query": "single GraphQL query or mutation document",
+    "query": "single GraphQL query document",
     "variables": {
       "optional": "graphql variables object"
     }
@@ -1074,6 +1074,8 @@ Optional client-side tool extension:
   ```
 
 - `query` must be a non-empty string.
+- `query` must be a GraphQL query document. The first operation must be a query, and the
+  document must not contain mutation or subscription operations.
 - `query` must contain exactly one GraphQL operation.
 - `variables` is optional and, when present, must be a JSON object.
 - Implementations may additionally accept a raw GraphQL query string as shorthand input.

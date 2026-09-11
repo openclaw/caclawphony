@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Codex.DynamicTool do
 
   @linear_graphql_tool "linear_graphql"
   @linear_graphql_description """
-  Execute a raw GraphQL query or mutation against Linear using Symphony's configured auth.
+  Execute a raw GraphQL query against Linear using Symphony's configured auth. Mutation and subscription documents are refused.
   """
   @linear_graphql_input_schema %{
     "type" => "object",
@@ -16,7 +16,7 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     "properties" => %{
       "query" => %{
         "type" => "string",
-        "description" => "GraphQL query or mutation document to execute against Linear."
+        "description" => "GraphQL query document to execute against Linear. Mutations and subscriptions are refused."
       },
       "variables" => %{
         "type" => ["object", "null"],
@@ -57,6 +57,7 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     linear_client = Keyword.get(opts, :linear_client, &Client.graphql/3)
 
     with {:ok, query, variables} <- normalize_linear_graphql_arguments(arguments),
+         :ok <- reject_non_query_document(query),
          {:ok, response} <- linear_client.(query, variables, []) do
       graphql_response(response)
     else
@@ -109,6 +110,161 @@ defmodule SymphonyElixir.Codex.DynamicTool do
       _ -> {:error, :invalid_variables}
     end
   end
+
+  defp reject_non_query_document(document) do
+    if query_only_document?(document) do
+      :ok
+    else
+      {:error, :graphql_non_query_document}
+    end
+  end
+
+  defp query_only_document?(document) do
+    case graphql_operation_kinds(document) do
+      [] ->
+        false
+
+      kinds ->
+        Enum.all?(kinds, &(&1 == :query))
+    end
+  end
+
+  defp graphql_operation_kinds(document) do
+    case strip_graphql_noise(document) do
+      {:ok, stripped} ->
+        stripped
+        |> scan_graphql_operations(0, 0, [])
+        |> Enum.reverse()
+
+      :unclosed_string ->
+        [:unknown]
+    end
+  end
+
+  defp strip_graphql_noise(document), do: strip_graphql_noise(document, [])
+
+  defp strip_graphql_noise("", acc), do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary()}
+
+  defp strip_graphql_noise(<<"\"\"\"", rest::binary>>, acc) do
+    case skip_block_string(rest) do
+      {:ok, after_string} -> strip_graphql_noise(after_string, [?\s | acc])
+      :unclosed_string -> :unclosed_string
+    end
+  end
+
+  defp strip_graphql_noise(<<"\"", rest::binary>>, acc) do
+    case skip_quoted_string(rest) do
+      {:ok, after_string} -> strip_graphql_noise(after_string, [?\s | acc])
+      :unclosed_string -> :unclosed_string
+    end
+  end
+
+  defp strip_graphql_noise(<<"#", rest::binary>>, acc) do
+    strip_graphql_noise(skip_line_comment(rest), [?\s | acc])
+  end
+
+  defp strip_graphql_noise(<<char, rest::binary>>, acc) do
+    strip_graphql_noise(rest, [char | acc])
+  end
+
+  defp skip_block_string(""), do: :unclosed_string
+  defp skip_block_string(<<"\"\"\"", rest::binary>>), do: {:ok, rest}
+  defp skip_block_string(<<_char, rest::binary>>), do: skip_block_string(rest)
+
+  defp skip_quoted_string(""), do: :unclosed_string
+  defp skip_quoted_string(<<"\"", rest::binary>>), do: {:ok, rest}
+  defp skip_quoted_string(<<"\\", _char, rest::binary>>), do: skip_quoted_string(rest)
+  defp skip_quoted_string(<<"\\", _rest::binary>>), do: :unclosed_string
+  defp skip_quoted_string(<<_char, rest::binary>>), do: skip_quoted_string(rest)
+
+  defp skip_line_comment(""), do: ""
+  defp skip_line_comment(<<"\n", rest::binary>>), do: rest
+  defp skip_line_comment(<<_char, rest::binary>>), do: skip_line_comment(rest)
+
+  defp scan_graphql_operations("", _brace_depth, _paren_depth, acc), do: acc
+
+  defp scan_graphql_operations(<<char, rest::binary>> = remaining, brace_depth, paren_depth, acc) do
+    cond do
+      whitespace?(char) ->
+        scan_graphql_operations(rest, brace_depth, paren_depth, acc)
+
+      brace_depth > 0 or paren_depth > 0 ->
+        {next_brace, next_paren} = update_depths(char, brace_depth, paren_depth)
+        scan_graphql_operations(rest, next_brace, next_paren, acc)
+
+      true ->
+        scan_top_level_token(remaining, brace_depth, paren_depth, acc)
+    end
+  end
+
+  defp scan_top_level_token(<<char, rest::binary>> = remaining, brace_depth, paren_depth, acc) do
+    cond do
+      char == ?{ ->
+        scan_graphql_operations(rest, brace_depth + 1, paren_depth, [:query | acc])
+
+      identifier_start?(char) ->
+        scan_top_level_identifier(remaining, brace_depth, paren_depth, acc)
+
+      true ->
+        [:unknown | acc]
+    end
+  end
+
+  defp scan_top_level_identifier(remaining, brace_depth, paren_depth, acc) do
+    {word, after_word} = take_identifier(remaining)
+
+    case classify_definition(word) do
+      {:operation, kind} ->
+        {after_header, next_brace, next_paren} = skip_definition_header(after_word, brace_depth, paren_depth)
+        scan_graphql_operations(after_header, next_brace, next_paren, [kind | acc])
+
+      :fragment ->
+        {after_header, next_brace, next_paren} = skip_definition_header(after_word, brace_depth, paren_depth)
+        scan_graphql_operations(after_header, next_brace, next_paren, acc)
+
+      :unknown ->
+        [:unknown | acc]
+    end
+  end
+
+  defp classify_definition("query"), do: {:operation, :query}
+  defp classify_definition("mutation"), do: {:operation, :mutation}
+  defp classify_definition("subscription"), do: {:operation, :subscription}
+  defp classify_definition("fragment"), do: :fragment
+  defp classify_definition(_word), do: :unknown
+
+  defp skip_definition_header("", brace_depth, paren_depth), do: {"", brace_depth, paren_depth}
+
+  defp skip_definition_header(<<char, rest::binary>>, brace_depth, paren_depth) do
+    if brace_depth == 0 and paren_depth == 0 and char == ?{ do
+      {rest, 1, 0}
+    else
+      {next_brace, next_paren} = update_depths(char, brace_depth, paren_depth)
+      skip_definition_header(rest, next_brace, next_paren)
+    end
+  end
+
+  defp update_depths(?{, brace_depth, paren_depth), do: {brace_depth + 1, paren_depth}
+  defp update_depths(?}, brace_depth, paren_depth), do: {max(brace_depth - 1, 0), paren_depth}
+  defp update_depths(?(, brace_depth, paren_depth), do: {brace_depth, paren_depth + 1}
+  defp update_depths(?), brace_depth, paren_depth), do: {brace_depth, max(paren_depth - 1, 0)}
+  defp update_depths(_char, brace_depth, paren_depth), do: {brace_depth, paren_depth}
+
+  defp take_identifier(<<char, rest::binary>>) do
+    take_identifier_chars(rest, <<char>>)
+  end
+
+  defp take_identifier_chars(<<char, rest::binary>>, acc) when char in ?0..?9 or char in ?A..?Z or char in ?a..?z or char == ?_ do
+    take_identifier_chars(rest, acc <> <<char>>)
+  end
+
+  defp take_identifier_chars(rest, acc), do: {acc, rest}
+
+  defp whitespace?(char) when char in [?\s, ?\t, ?\n, ?\r, ?,, 0xFEFF], do: true
+  defp whitespace?(_char), do: false
+
+  defp identifier_start?(char) when char in ?A..?Z or char in ?a..?z or char == ?_, do: true
+  defp identifier_start?(_char), do: false
 
   defp graphql_response(response) do
     success =
@@ -167,6 +323,14 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     %{
       "error" => %{
         "message" => "`linear_graphql.variables` must be a JSON object when provided."
+      }
+    }
+  end
+
+  defp tool_error_payload(:graphql_non_query_document) do
+    %{
+      "error" => %{
+        "message" => "`linear_graphql` only accepts GraphQL query documents. Mutation and subscription operations are refused."
       }
     }
   end

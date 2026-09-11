@@ -72,6 +72,88 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert Jason.decode!(text) == %{"data" => %{"viewer" => %{"id" => "usr_123"}}}
   end
 
+  test "linear_graphql refuses mutation documents before calling Linear" do
+    response =
+      DynamicTool.execute(
+        "linear_graphql",
+        %{"query" => "mutation ViewerName { viewer { id } }"},
+        linear_client: fn _query, _variables, _opts ->
+          flunk("linear client should not be called for mutation documents")
+        end
+      )
+
+    assert response["success"] == false
+
+    assert [
+             %{
+               "type" => "inputText",
+               "text" => text
+             }
+           ] = response["contentItems"]
+
+    assert Jason.decode!(text) == %{
+             "error" => %{
+               "message" => "`linear_graphql` only accepts GraphQL query documents. Mutation and subscription operations are refused."
+             }
+           }
+  end
+
+  test "linear_graphql refuses subscription documents before calling Linear" do
+    response =
+      DynamicTool.execute(
+        "linear_graphql",
+        %{"query" => "subscription ViewerName { viewer { id } }"},
+        linear_client: fn _query, _variables, _opts ->
+          flunk("linear client should not be called for subscription documents")
+        end
+      )
+
+    assert response["success"] == false
+
+    assert [
+             %{
+               "text" => text
+             }
+           ] = response["contentItems"]
+
+    assert Jason.decode!(text) == %{
+             "error" => %{
+               "message" => "`linear_graphql` only accepts GraphQL query documents. Mutation and subscription operations are refused."
+             }
+           }
+  end
+
+  test "linear_graphql refuses a raw mutation string before calling Linear" do
+    response =
+      DynamicTool.execute(
+        "linear_graphql",
+        "  mutation ViewerName { viewer { id } }  ",
+        linear_client: fn _query, _variables, _opts ->
+          flunk("linear client should not be called for raw mutation strings")
+        end
+      )
+
+    assert response["success"] == false
+    assert hd(response["contentItems"])["text"] =~ "only accepts GraphQL query documents"
+  end
+
+  test "linear_graphql still executes shorthand query documents" do
+    test_pid = self()
+
+    response =
+      DynamicTool.execute(
+        "linear_graphql",
+        %{"query" => "{ viewer { id } }"},
+        linear_client: fn query, variables, opts ->
+          send(test_pid, {:linear_client_called, query, variables, opts})
+          {:ok, %{"data" => %{"viewer" => %{"id" => "usr_shorthand"}}}}
+        end
+      )
+
+    assert_received {:linear_client_called, "{ viewer { id } }", %{}, []}
+    assert response["success"] == true
+  end
+
   test "linear_graphql accepts a raw GraphQL query string" do
     test_pid = self()
 
@@ -151,7 +233,7 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     response =
       DynamicTool.execute(
         "linear_graphql",
-        %{"query" => "mutation BadMutation { nope }"},
+        %{"query" => "query BadQuery { nope }"},
         linear_client: fn _query, _variables, _opts ->
           {:ok, %{"errors" => [%{"message" => "Unknown field `nope`"}], "data" => nil}}
         end
