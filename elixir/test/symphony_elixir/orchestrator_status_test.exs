@@ -895,6 +895,52 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert next_poll_in_ms <= 50
   end
 
+  test "manual refresh cancels the pending poll tick instead of starting another loop" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: nil,
+      poll_interval_ms: 60_000
+    )
+
+    orchestrator_name = Module.concat(__MODULE__, :RefreshTickOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    _ =
+      wait_for_snapshot(
+        pid,
+        fn
+          %{polling: %{checking?: false, next_poll_in_ms: due_in_ms}} when is_integer(due_in_ms) ->
+            true
+
+          _ ->
+            false
+        end,
+        1_000
+      )
+
+    log =
+      capture_log(fn ->
+        for _ <- 1..5 do
+          assert %{queued: true} = Orchestrator.request_refresh(orchestrator_name)
+        end
+
+        Process.sleep(500)
+      end)
+
+    polls =
+      log
+      |> String.split("Linear API token missing in WORKFLOW.md")
+      |> length()
+      |> Kernel.-(1)
+
+    assert polls == 1
+  end
+
   test "orchestrator restarts stalled workers with retry backoff" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,

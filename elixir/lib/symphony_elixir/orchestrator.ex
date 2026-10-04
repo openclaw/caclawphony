@@ -34,7 +34,9 @@ defmodule SymphonyElixir.Orchestrator do
       claimed: MapSet.new(),
       retry_attempts: %{},
       codex_totals: nil,
-      codex_rate_limits: nil
+      codex_rate_limits: nil,
+      tick_timer: nil,
+      tick_generation: 0
     ]
   end
 
@@ -58,18 +60,21 @@ defmodule SymphonyElixir.Orchestrator do
     }
 
     run_terminal_workspace_cleanup()
-    :ok = schedule_tick(0)
 
-    {:ok, state}
+    {:ok, schedule_tick(state, 0)}
   end
 
   @impl true
-  def handle_info(:tick, state) do
+  def handle_info({:tick, generation}, %State{tick_generation: generation} = state) do
     state = refresh_runtime_config(state)
-    state = %{state | poll_check_in_progress: true, next_poll_due_at_ms: nil}
+    state = %{state | poll_check_in_progress: true, next_poll_due_at_ms: nil, tick_timer: nil}
 
     notify_dashboard()
     :ok = schedule_poll_cycle_start()
+    {:noreply, state}
+  end
+
+  def handle_info({:tick, _generation}, state) do
     {:noreply, state}
   end
 
@@ -78,9 +83,9 @@ defmodule SymphonyElixir.Orchestrator do
     state = maybe_dispatch(state)
     now_ms = System.monotonic_time(:millisecond)
     next_poll_due_at_ms = now_ms + state.poll_interval_ms
-    :ok = schedule_tick(state.poll_interval_ms)
 
     state = %{state | poll_check_in_progress: false, next_poll_due_at_ms: next_poll_due_at_ms}
+    state = schedule_tick(state, state.poll_interval_ms)
 
     notify_dashboard()
     {:noreply, state}
@@ -987,9 +992,15 @@ defmodule SymphonyElixir.Orchestrator do
     already_due? = is_integer(state.next_poll_due_at_ms) and state.next_poll_due_at_ms <= now_ms
     coalesced = state.poll_check_in_progress == true or already_due?
 
-    unless coalesced do
-      :ok = schedule_tick(0)
-    end
+    state =
+      if coalesced do
+        state
+      else
+        # Cancel the pending interval tick before the immediate one. Each
+        # refresh used to leave the old timer running, so every call added
+        # another poll loop.
+        schedule_tick(state, 0)
+      end
 
     {:reply,
      %{
@@ -1074,8 +1085,18 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
-  defp schedule_tick(delay_ms) do
-    :timer.send_after(delay_ms, self(), :tick)
+  defp schedule_tick(%State{} = state, delay_ms) when is_integer(delay_ms) and delay_ms >= 0 do
+    cancel_tick_timer(state.tick_timer)
+    generation = state.tick_generation + 1
+    {:ok, timer} = :timer.send_after(delay_ms, self(), {:tick, generation})
+
+    %{state | tick_timer: timer, tick_generation: generation}
+  end
+
+  defp cancel_tick_timer(nil), do: :ok
+
+  defp cancel_tick_timer(timer) do
+    _ = :timer.cancel(timer)
     :ok
   end
 
