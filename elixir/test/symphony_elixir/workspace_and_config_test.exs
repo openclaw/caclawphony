@@ -174,6 +174,65 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "failed after_create hook removes the workspace so a retry runs the hook" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-hook-retry-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      counter = Path.join(test_root, "after_create.count")
+      File.mkdir_p!(workspace_root)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "echo call >> \"#{counter}\"; echo nope && exit 17"
+      )
+
+      assert {:error, {:workspace_hook_failed, "after_create", 17, _output}} =
+               Workspace.create_for_issue("MT-RETRY")
+
+      workspace = Path.join(workspace_root, "MT-RETRY")
+      refute File.exists?(workspace)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: "echo call >> \"#{counter}\"; echo ok > README.md"
+      )
+
+      assert {:ok, ^workspace} = Workspace.create_for_issue("MT-RETRY")
+      assert File.read!(Path.join(workspace, "README.md")) == "ok\n"
+      assert length(String.split(String.trim(File.read!(counter)), "\n")) == 2
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "timed out after_create hook removes the new workspace" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-hook-timeout-clean-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_timeout_ms: 200,
+        hook_after_create: "sleep 2"
+      )
+
+      assert {:error, {:workspace_hook_timeout, "after_create", 200}} =
+               Workspace.create_for_issue("MT-TIMEOUT-CLEAN")
+
+      refute File.exists?(Path.join(workspace_root, "MT-TIMEOUT-CLEAN"))
+    after
+      File.rm_rf(workspace_root)
+    end
+  end
+
   test "workspace surfaces after_create hook timeouts" do
     workspace_root =
       Path.join(

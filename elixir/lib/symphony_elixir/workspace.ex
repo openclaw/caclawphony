@@ -130,7 +130,16 @@ defmodule SymphonyElixir.Workspace do
             :ok
 
           command ->
-            run_hook(command, workspace, issue_context, "after_create")
+            case run_hook(command, workspace, issue_context, "after_create") do
+              :ok ->
+                :ok
+
+              {:error, _reason} = error ->
+                # The directory is new. Leaving it makes the retry look like
+                # reuse, which skips after_create even though the hook failed.
+                File.rm_rf(workspace)
+                error
+            end
         end
 
       false ->
