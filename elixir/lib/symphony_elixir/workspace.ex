@@ -182,21 +182,100 @@ defmodule SymphonyElixir.Workspace do
       {"SYMPHONY_HOOK_NAME", hook_name}
     ]
 
-    task =
-      Task.async(fn ->
-        System.cmd("sh", ["-lc", command], cd: workspace, stderr_to_stdout: true, env: hook_env)
-      end)
+    port = open_hook_port(command, workspace, hook_env)
+    os_pid = hook_os_pid(port)
+    deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
 
-    case Task.yield(task, timeout_ms) do
+    case collect_hook_output(port, deadline_ms, []) do
       {:ok, cmd_result} ->
+        close_hook_port(port)
         handle_hook_command_result(cmd_result, workspace, issue_context, hook_name)
 
-      nil ->
-        Task.shutdown(task, :brutal_kill)
+      :timeout ->
+        # Task.shutdown only kills the Elixir task. sh -lc and the children
+        # it started keep running unless the process group is signalled.
+        kill_hook_process_group(os_pid)
+        close_hook_port(port)
 
         Logger.warning("Workspace hook timed out hook=#{hook_name} #{issue_log_context(issue_context)} workspace=#{workspace} timeout_ms=#{timeout_ms}")
 
         {:error, {:workspace_hook_timeout, hook_name, timeout_ms}}
+    end
+  end
+
+  defp open_hook_port(command, workspace, hook_env) do
+    {executable, args} = hook_executable(command)
+
+    Port.open({:spawn_executable, executable}, [
+      :binary,
+      :exit_status,
+      :stderr_to_stdout,
+      {:args, args},
+      {:cd, to_charlist(workspace)},
+      {:env, Enum.map(hook_env, fn {key, value} -> {to_charlist(key), to_charlist(value)} end)}
+    ])
+  end
+
+  defp hook_executable(command) do
+    shell = System.find_executable("sh") || "/bin/sh"
+
+    case System.find_executable("perl") do
+      nil ->
+        {shell, ["-lc", command]}
+
+      perl ->
+        # setpgrp makes this pid the process group leader. exec keeps that
+        # pid, so a later kill of the group reaches sh and its children.
+        {perl, ["-e", "setpgrp(0, 0); exec @ARGV or die $!", "--", shell, "-lc", command]}
+    end
+  end
+
+  defp hook_os_pid(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, os_pid} when is_integer(os_pid) and os_pid > 0 -> os_pid
+      _ -> nil
+    end
+  end
+
+  defp collect_hook_output(port, deadline_ms, acc) do
+    timeout_ms = max(deadline_ms - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {^port, {:data, data}} ->
+        collect_hook_output(port, deadline_ms, [acc, data])
+
+      {^port, {:exit_status, status}} ->
+        {:ok, {IO.iodata_to_binary(acc), status}}
+    after
+      timeout_ms ->
+        :timeout
+    end
+  end
+
+  defp kill_hook_process_group(nil), do: :ok
+
+  defp kill_hook_process_group(os_pid) when is_integer(os_pid) and os_pid > 0 do
+    _ = System.cmd("kill", ["-KILL", "--", "-#{os_pid}"], stderr_to_stdout: true)
+    :ok
+  end
+
+  defp close_hook_port(port) do
+    if Port.info(port) != nil do
+      try do
+        Port.close(port)
+      catch
+        :error, _ -> :ok
+      end
+    end
+
+    flush_hook_port(port)
+  end
+
+  defp flush_hook_port(port) do
+    receive do
+      {^port, _message} -> flush_hook_port(port)
+    after
+      0 -> :ok
     end
   end
 

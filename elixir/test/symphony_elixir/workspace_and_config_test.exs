@@ -195,6 +195,34 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "timed out workspace hook kills the shell and its child" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-hook-orphan-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      marker = Path.join(test_root, "hook-finished")
+      File.mkdir_p!(workspace_root)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_timeout_ms: 300,
+        hook_after_create: "sleep 2; touch \"#{marker}\""
+      )
+
+      assert {:error, {:workspace_hook_timeout, "after_create", 300}} =
+               Workspace.create_for_issue("MT-ORPHAN")
+
+      Process.sleep(2_200)
+      refute File.exists?(marker)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "workspace creates an empty directory when no bootstrap hook is configured" do
     workspace_root =
       Path.join(
